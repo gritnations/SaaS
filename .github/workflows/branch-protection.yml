@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/github-script@v7
         with:
-          github-token: [redacted] secrets.BRANCH_PROTECTION_TOKEN }}
+          github-token: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
           script: |
             await github.rest.repos.updateBranchProtection({
               owner: context.repo.owner,
