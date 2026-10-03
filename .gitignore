@@ -1,0 +1,4 @@
+# Local Claude Code settings (per machine)
+.claude/settings.local.json
+# The engine keeps its own .gitignore under schedule-booking/
+_sb_src/

@@ -1,0 +1,9 @@
+{
+  "name": "booking-admin",
+  "private": true,
+  "type": "module",
+  "description": "Static admin panel (served by Firebase Hosting). package.json exists only so Node treats the files as ES modules for tests; it is excluded from hosting.",
+  "scripts": {
+    "test": "node test/lib.test.js"
+  }
+}

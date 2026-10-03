@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Demo mailbox</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; background: #F7F4EE; color: #141414; }
+  .banner { background: #C3985E; text-align: center; padding: 10px 16px; font-weight: 700; font-size: 14px; }
+  .wrap { display: flex; gap: 16px; max-width: 1100px; margin: 20px auto; padding: 0 16px; align-items: flex-start; }
+  .list { flex: 0 0 340px; background: #fff; border: 1px solid #E8E0D0; border-radius: 8px; overflow: hidden; }
+  .list h1 { font-size: 16px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #E8E0D0; color: #044233; display: flex; justify-content: space-between; align-items: center; }
+  .list h1 button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid #D9D2C3; background: #fff; border-radius: 4px; cursor: pointer; }
+  .item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid #F0EADC; background: #fff; padding: 12px 16px; font: inherit; cursor: pointer; }
+  .item:hover { background: #FBF9F4; }
+  .item[aria-current="true"] { background: #EEF4F1; }
+  .item .to { font-size: 12px; color: #666; }
+  .item .subject { font-weight: 700; margin: 2px 0; font-size: 14px; }
+  .item .time { font-size: 12px; color: #999; }
+  .view { flex: 1; background: #fff; border: 1px solid #E8E0D0; border-radius: 8px; min-height: 420px; overflow: hidden; }
+  .meta { padding: 14px 16px; border-bottom: 1px solid #E8E0D0; font-size: 14px; }
+  .meta div { padding: 2px 0; } .meta b { display: inline-block; width: 60px; color: #666; font-weight: 600; }
+  iframe { width: 100%; height: 520px; border: 0; }
+  .empty { padding: 32px 16px; color: #666; text-align: center; font-size: 14px; }
+  @media (max-width: 760px) { .wrap { flex-direction: column; } .list { flex: none; width: 100%; } }
+</style>
+</head>
+<body>
+<div class="banner">DEMO MAILBOX — emails the system would send, captured locally. Nothing here was actually delivered.</div>
+<div class="wrap">
+  <div class="list">
+    <h1><span>Sent emails</span><button id="refresh" type="button">Refresh</button></h1>
+    <div id="items"><p class="empty">Loading&hellip;</p></div>
+  </div>
+  <div class="view" id="view"><p class="empty">Select an email to read it.</p></div>
+</div>
+<script>
+(function () {
+  var API = 'http://127.0.0.1:5101/demo-booking/us-central1';
+  var $ = function (id) { return document.getElementById(id); };
+  var emails = [];
+  var selectedId = null;
+  var lastSignature = '';
+
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
+
+  function open(mail) {
+    selectedId = mail.id;
+    var view = $('view');
+    view.textContent = '';
+    var meta = el('div', 'meta');
+    [['To', mail.to], ['Subject', mail.subject], ['Sent', new Date(mail.sentAt).toLocaleString()]].forEach(function (row) {
+      var d = el('div'); d.appendChild(el('b', '', row[0])); d.appendChild(document.createTextNode(row[1])); meta.appendChild(d);
+    });
+    var frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', '');            // the email is shown as inert HTML: no scripts, no navigation
+    frame.setAttribute('title', 'Email preview');
+    frame.srcdoc = mail.html;
+    view.appendChild(meta); view.appendChild(frame);
+    paintList();
+  }
+
+  function paintList() {
+    var box = $('items');
+    box.textContent = '';
+    if (emails.length === 0) { box.appendChild(el('p', 'empty', 'No emails yet. Complete a booking and they will appear here.')); return; }
+    emails.forEach(function (m) {
+      var b = el('button', 'item');
+      b.type = 'button';
+      if (m.id === selectedId) b.setAttribute('aria-current', 'true');
+      b.appendChild(el('div', 'to', 'To: ' + m.to));
+      b.appendChild(el('div', 'subject', m.subject));
+      b.appendChild(el('div', 'time', new Date(m.sentAt).toLocaleString()));
+      b.addEventListener('click', function () { open(m); });
+      box.appendChild(b);
+    });
+  }
+
+  function load() {
+    fetch(API + '/demoMailbox')
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function (data) {
+        var sig = data.emails.map(function (e) { return e.id; }).join(',');
+        if (sig === lastSignature) return;              // nothing new: don't disturb what's being read
+        lastSignature = sig;
+        emails = data.emails;
+        paintList();
+        if (!selectedId && emails.length) open(emails[0]);
+      })
+      .catch(function () { $('items').textContent = ''; $('items').appendChild(el('p', 'empty', 'Could not reach the demo backend.')); });
+  }
+
+  $('refresh').addEventListener('click', load);
+  load();
+  window.setInterval(load, 3000);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+rules_version = '2';
+
+// Access rules for the booking admin panel.
+//
+// The PUBLIC booking pages never read or write Firestore directly — they go
+// through Cloud Functions, which use the Admin SDK and bypass these rules
+// entirely. So nothing here is for the public: every collection is admin-only,
+// and anything not listed below (e.g. rateLimits) is denied to everyone.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Who counts as an admin ------------------------------------------
+    // Signed in, email VERIFIED, and on this list. To add an admin: add their
+    // email here (lowercase) and run  firebase deploy --only firestore:rules
+    // An empty list means nobody is an admin — the safe default.
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.lower() in [
+          'owner@example.com'
+        ];
+    }
+
+    // ---- Field validators ------------------------------------------------
+    // The backend also skips malformed documents defensively, but stopping a
+    // bad write here means a client bug can never produce one in the first place.
+
+    function isTime(s) {
+      return s is string && s.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$');
+    }
+
+    function validService(d) {
+      return d.keys().hasOnly(['name', 'description', 'durationMinutes', 'amount', 'active', 'sortOrder'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 120
+        && d.description is string && d.description.size() <= 500
+        && d.durationMinutes is int && d.durationMinutes > 0 && d.durationMinutes <= 480
+        && d.amount is int && d.amount >= 0
+        && d.active is bool
+        && d.sortOrder is number;
+    }
+
+    function validRule(d) {
+      return d.keys().hasOnly(['dayOfWeek', 'startTime', 'endTime'])
+        && d.dayOfWeek is int && d.dayOfWeek >= 0 && d.dayOfWeek <= 6
+        && isTime(d.startTime) && isTime(d.endTime)
+        && d.startTime < d.endTime;
+    }
+
+    // ---- Collections -----------------------------------------------------
+
+    match /services/{serviceId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin() && validService(request.resource.data);
+    }
+
+    match /availabilityRules/{ruleId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin() && validRule(request.resource.data);
+    }
+
+    // The document ID is the date itself, e.g. 2026-10-03.
+    match /blockedDates/{dateKey} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly(['reason'])
+        && (!('reason' in request.resource.data)
+            || (request.resource.data.reason is string && request.resource.data.reason.size() <= 200));
+    }
+
+    // Only settings/general exists. The Meet link ends up as a clickable link
+    // in customer emails, so it must be https (or empty to switch it off).
+    // breakMinutes is the gap kept between sessions: a whole number, 0-120.
+    // Either field may be written on its own (the admin panel saves them
+    // separately), so each is checked only when present.
+    match /settings/{docId} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin()
+        && docId == 'general'
+        && request.resource.data.keys().hasOnly(['meetLink', 'breakMinutes'])
+        && (!('meetLink' in request.resource.data)
+            || (request.resource.data.meetLink is string
+                && (request.resource.data.meetLink == ''
+                    || request.resource.data.meetLink.matches('^https://.{1,300}$'))))
+        && (!('breakMinutes' in request.resource.data)
+            || (request.resource.data.breakMinutes is int
+                && request.resource.data.breakMinutes >= 0
+                && request.resource.data.breakMinutes <= 120));
+    }
+
+    // Bookings are created and changed by Cloud Functions only. The single
+    // thing an admin may do directly is mark a confirmed session as a no-show.
+    // Cancelling is deliberately NOT allowed here: it can involve a refund and
+    // a customer email, so it goes through a Cloud Function instead.
+    match /bookings/{bookingId} {
+      allow read: if isAdmin();
+      // Three things only, each touching exactly one field:
+      //   confirmed -> no_show                       (the customer didn't turn up)
+      //   cancelled + refund outstanding -> refunded_manually   (the owner refunded it in Paymob)
+      //   paid_slot_conflict -> refunded             (same, for a payment that lost its slot)
+      // Cancelling itself is NOT allowed here: it goes through a Cloud Function.
+      allow update: if isAdmin() && (
+        (resource.data.status == 'confirmed'
+          && request.resource.data.status == 'no_show'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+        || (resource.data.status == 'cancelled'
+          && resource.data.refundStatus in ['needs_manual', 'pending']
+          && request.resource.data.refundStatus == 'refunded_manually'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['refundStatus']))
+        || (resource.data.status == 'paid_slot_conflict'
+          && request.resource.data.status == 'refunded'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+      );
+      allow create, delete: if false;
+    }
+  }
+}

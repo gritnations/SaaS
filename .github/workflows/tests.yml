@@ -1,0 +1,69 @@
+# Runs the booking engine's tests on every push to main and every pull request.
+# No credentials needed: the functions tests use an in-memory Firestore
+# stand-in, and the rules tests use the local Firestore emulator with a
+# demo project id.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  functions:
+    name: Functions (booking logic)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: schedule-booking/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: schedule-booking/functions/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  admin:
+    name: Admin panel (pure logic)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: schedule-booking/admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node test/lib.test.js
+
+  rules:
+    name: Firestore security rules (emulator)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: schedule-booking/rules-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: schedule-booking/rules-test/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --no-audit --no-fund
+      - run: npm test

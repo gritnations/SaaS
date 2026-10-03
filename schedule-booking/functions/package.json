@@ -1,0 +1,19 @@
+{
+  "name": "booking-functions",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/logic.test.js && node test/bookings.test.js && node test/seed.test.js && node test/meeting.test.js && node test/hardening.test.js && node test/breaks.test.js && node test/demo.test.js && node test/manage.test.js",
+    "serve": "firebase emulators:start --only functions,firestore,pubsub",
+    "deploy": "firebase deploy --only functions"
+  },
+  "dependencies": {
+    "@google-cloud/pubsub": "^4.5.0",
+    "firebase-admin": "^12.5.0",
+    "firebase-functions": "^7.4.0",
+    "google-auth-library": "^9.15.1"
+  }
+}
