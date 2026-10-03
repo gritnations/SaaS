@@ -1,0 +1,33 @@
+name: Enforce branch protection
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  protect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
+          script: |
+            await github.rest.repos.updateBranchProtection({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+              required_status_checks: {
+                strict: false,
+                checks: [
+                  { context: 'Functions (booking logic)' },
+                  { context: 'Admin panel (pure logic)' },
+                  { context: 'Firestore security rules (emulator)' },
+                ],
+              },
+              enforce_admins: false,
+              required_pull_request_reviews: null,
+              restrictions: null,
+            });
