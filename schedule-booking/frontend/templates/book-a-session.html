@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Book a session</title>
+    <link rel="stylesheet" href="../css/booking.css">
+</head>
+<body>
+    <!-- Starting point for the customer booking page. Copy the <main> block into your own page layout (header, footer, fonts), or use this file as is. -->
+    <main class="booking-template-main">
+        <div class="booking-page-inner">
+            <p style="font-size: 14px; line-height: 1.7; color: #333; margin-bottom: 50px;">Choose a service, pick a time, and confirm. For paid services your time is only held once payment is received — nothing is booked before that. Not ready to commit yet? <a href="contact.html" style="color: #1B7A7E; font-weight: 600;">Send a question first</a> instead.</p>
+
+            <!-- STEP 1: SERVICE SELECTION -->
+            <div class="booking-step" id="booking-step-service">
+                <p class="booking-step-label">Step 1: Choose a Service</p>
+
+                <p id="booking-services-loading" class="booking-status-text">Loading services&hellip;</p>
+
+                <p id="booking-services-error" class="booking-status-text booking-status-error" hidden>
+                    Booking isn't available online just yet. Please <a href="contact.html">get in touch directly</a> and we'll arrange a time.
+                </p>
+
+                <div id="booking-services-grid" class="booking-service-grid" hidden></div>
+
+                <div id="booking-service-summary" class="booking-selected-summary" hidden>
+                    <span id="booking-service-summary-text"></span>
+                    <button type="button" id="booking-change-service-btn" class="booking-link-btn">Change</button>
+                </div>
+            </div>
+
+            <!-- STEP 2: DATE + TIME SELECTION -->
+            <div class="booking-step" id="booking-step-slots" hidden>
+                <p class="booking-step-label">Step 2: Choose a Date &amp; Time</p>
+
+                <p id="booking-slots-notice" class="booking-status-text booking-status-error" hidden></p>
+
+                <p id="booking-slots-loading" class="booking-status-text">Loading available times&hellip;</p>
+
+                <p id="booking-slots-error" class="booking-status-text booking-status-error" hidden>
+                    Booking isn't available online just yet. Please <a href="contact.html">get in touch directly</a> and we'll arrange a time.
+                </p>
+
+                <p id="booking-slots-empty" class="booking-status-text" hidden>
+                    No open times in the next couple of weeks. Please <a href="contact.html">get in touch directly</a> and we'll find a time that works.
+                </p>
+
+                <div class="booking-scheduler-grid" id="booking-scheduler-grid">
+                    <!-- Month calendar: pick a day first -->
+                    <div id="booking-calendar" class="booking-calendar" hidden>
+                        <div class="booking-calendar-header">
+                            <button type="button" id="booking-cal-prev" class="booking-calendar-nav-btn" aria-label="Previous month">&#8249;</button>
+                            <span id="booking-cal-month-label" class="booking-calendar-month-label" aria-live="polite"></span>
+                            <button type="button" id="booking-cal-next" class="booking-calendar-nav-btn" aria-label="Next month">&#8250;</button>
+                        </div>
+                        <div class="booking-calendar-weekdays" id="booking-cal-weekdays"></div>
+                        <div class="booking-calendar-grid" id="booking-cal-grid"></div>
+                    </div>
+
+                    <!-- Times for the selected day, shown to the right of the calendar -->
+                    <div class="booking-day-times-col">
+                        <p id="booking-day-times-placeholder" class="booking-status-text">Select a date to see available times.</p>
+
+                        <div id="booking-day-times" class="booking-day-times" hidden>
+                            <p class="booking-day-times-label" id="booking-day-times-label"></p>
+                            <p id="booking-day-times-empty" class="booking-status-text" hidden>No open times on this day &mdash; pick another date above.</p>
+                            <div id="booking-slots-grid" class="booking-slots-grid"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="booking-selected-summary" class="booking-selected-summary" hidden>
+                    <span id="booking-selected-summary-text"></span>
+                    <button type="button" id="booking-change-slot-btn" class="booking-link-btn">Change</button>
+                </div>
+            </div>
+
+            <!-- STEP 3: DETAILS (+ PAYMENT, for paid services) -->
+            <div class="booking-step" id="booking-step-details" hidden style="margin-bottom: 0;">
+                <p class="booking-step-label">Step 3: Your Details</p>
+
+                <form id="booking-details-form" class="booking-form" novalidate>
+                    <div class="booking-form-row">
+                        <label for="booking-name">Full name</label>
+                        <input type="text" id="booking-name" name="name" autocomplete="name" required>
+                    </div>
+                    <div class="booking-form-row">
+                        <label for="booking-email">Email</label>
+                        <div class="booking-input-wrap">
+                            <input type="email" id="booking-email" name="email" autocomplete="email" required aria-describedby="booking-email-hint">
+                            <span class="booking-field-tick" id="booking-email-tick" aria-hidden="true" hidden>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>
+                            </span>
+                        </div>
+                        <p id="booking-email-hint" class="booking-field-hint" hidden></p>
+                    </div>
+                    <div class="booking-form-row">
+                        <label for="booking-mobile">Mobile</label>
+                        <div class="booking-phone-row">
+                            <select id="booking-country" name="country" aria-label="Country calling code" autocomplete="tel-country-code"></select>
+                            <input type="tel" id="booking-mobile" name="mobile" autocomplete="tel-national" inputmode="tel" placeholder="e.g. 501234567" required aria-describedby="booking-mobile-hint">
+                        </div>
+                        <p id="booking-mobile-hint" class="booking-field-hint" hidden></p>
+                    </div>
+
+                    <p id="booking-form-error" class="booking-status-text booking-status-error" hidden></p>
+
+                    <button type="submit" class="btn-primary" id="booking-submit-btn">Proceed to Payment</button>
+                    <p id="booking-details-note" style="font-size: 13px; line-height: 1.6; color: #666; margin-top: 12px;">Your details are sent over a secure, encrypted connection. You'll be redirected to our secure payment provider to complete payment. This confirms your appointment — nothing is booked until payment clears.</p>
+                </form>
+            </div>
+
+            <!-- CONFIRMATION (shown after a free service is booked instantly) -->
+            <div id="booking-confirmation" class="booking-confirmation" hidden>
+                <h2 style="font-size: 32px; margin-bottom: 12px;">You're booked</h2>
+                <p id="booking-confirmation-text" style="font-size: 16px;"></p>
+                <div id="booking-confirmation-links"></div>
+            </div>
+
+            <!-- PAYMENT RESULT (shown when the payment provider sends the customer back here) -->
+            <div id="booking-payment-result" class="booking-confirmation" hidden aria-live="polite">
+                <h2 id="booking-payment-result-title" style="font-size: 32px; margin-bottom: 12px;"></h2>
+                <p id="booking-payment-result-text" style="font-size: 16px;"></p>
+                <div id="booking-payment-result-links"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Set these for your site (see frontend/README.md).
+        window.BOOKING_API_BASE = 'https://us-central1-YOUR-PROJECT.cloudfunctions.net';   // where the booking backend is deployed
+        window.BOOKING_CONTACT_EMAIL = 'contact@example.com';                              // optional: shown in error messages
+        // window.BOOKING_DEFAULT_COUNTRY = 'GB';                                          // optional: preselected phone country (ISO code)
+    </script>
+    <script src="../js/country-codes.js"></script>
+    <script src="../js/booking.js"></script>
+</body>
+</html>

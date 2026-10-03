@@ -1,0 +1,206 @@
+/* Booking admin — brand colours: deep green #044233, warm gold #C3985E,
+   charcoal #141414, ivory #F7F4EE. No inline styles anywhere (strict CSP). */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Helvetica Neue', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    color: #141414;
+    background: #F7F4EE;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { color: #044233; line-height: 1.25; }
+h1 { font-size: 26px; margin-bottom: 8px; }
+h2 { font-size: 20px; margin-bottom: 10px; }
+h3 { font-size: 16px; margin-bottom: 6px; }
+p { margin-bottom: 10px; }
+a { color: #1B7A7E; }
+[hidden] { display: none !important; }
+
+.muted { color: #666; }
+.small { font-size: 13px; }
+.container { max-width: 1040px; margin: 0 auto; padding: 24px 16px 60px; }
+
+/* ---- top bar ---- */
+.topbar { background: #fff; border-bottom: 1px solid #E8E0D0; }
+.topbar-inner {
+    max-width: 1040px; margin: 0 auto; padding: 10px 16px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+.brand-logo { height: 40px; width: auto; }
+.topbar-title {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: #C3985E;
+}
+.topbar-user { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+.topbar-email { font-size: 13px; color: #555; overflow-wrap: anywhere; }
+
+/* ---- buttons ---- */
+.btn {
+    display: inline-block; padding: 9px 18px; border-radius: 4px; border: 2px solid #044233;
+    background: #044233; color: #fff; font: inherit; font-weight: 600; font-size: 14px;
+    cursor: pointer; transition: background 0.2s, border-color 0.2s;
+}
+.btn:hover:not(:disabled) { background: #C3985E; border-color: #C3985E; }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-secondary { background: #fff; color: #044233; }
+.btn-secondary:hover:not(:disabled) { background: #F7F4EE; border-color: #C3985E; color: #044233; }
+.btn-ghost { background: transparent; color: #044233; border-color: #D9D2C3; padding: 6px 14px; }
+.btn-ghost:hover:not(:disabled) { background: #F7F4EE; border-color: #C3985E; color: #044233; }
+.btn-danger { background: #fff; color: #A33; border-color: #A33; }
+.btn-danger:hover:not(:disabled) { background: #A33; border-color: #A33; color: #fff; }
+.btn-small { padding: 5px 12px; font-size: 13px; }
+:focus-visible { outline: 3px solid #C3985E; outline-offset: 2px; }
+
+/* ---- forms ---- */
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: #044233; margin-bottom: 5px; }
+.field input[type="text"], .field input[type="email"], .field input[type="password"],
+.field input[type="number"], .field input[type="date"], .field input[type="time"],
+.field input[type="url"], .field textarea {
+    width: 100%; padding: 10px 12px; border: 2px solid #E0DACB; border-radius: 6px;
+    font: inherit; background: #fff; color: #141414;
+}
+.field textarea { min-height: 76px; resize: vertical; }
+
+/* Password field with a show / hide button inside its right edge. */
+.password-wrap { position: relative; }
+.field .password-wrap input { padding-right: 46px; }
+.password-toggle {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: none; border-radius: 0 6px 6px 0; color: #666; cursor: pointer; padding: 0;
+}
+.password-toggle:hover { color: #044233; }
+.password-toggle:focus-visible { outline: 2px solid #C3985E; outline-offset: -2px; }
+.password-toggle[aria-pressed="true"] { color: #044233; }
+.field input:focus, .field textarea:focus { outline: none; border-color: #C3985E; }
+.field-error { color: #A33; font-size: 13px; margin-top: 4px; }
+.field-hint { color: #666; font-size: 13px; margin-top: 4px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.check input { width: 18px; height: 18px; accent-color: #044233; }
+.form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ---- cards / panels ---- */
+.card { background: #fff; border: 1px solid #E8E0D0; border-radius: 8px; padding: 18px 20px; margin-bottom: 14px; }
+.card-narrow { max-width: 440px; margin: 40px auto; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+.banner { padding: 12px 16px; border-radius: 6px; margin-bottom: 14px; font-size: 14px; }
+.banner-bad { background: #FBEAEA; border: 1px solid #E2B4B4; color: #7A1F1F; }
+.banner-info { background: #EEF5F4; border: 1px solid #BBD8D5; color: #1F4B48; }
+.banner-warn { background: #FFF6E5; border: 1px solid #E8D3A2; color: #6B4E0F; }
+
+/* ---- tabs ---- */
+/* The grey rule is an inset shadow (not a border + negative margin) so the tabs never overflow
+   their container vertically — that overflow is what made a scrollbar appear. */
+.tabs { display: flex; gap: 4px; box-shadow: inset 0 -2px 0 #E8E0D0; margin-bottom: 20px; overflow-x: auto; overflow-y: hidden; }
+.tab {
+    background: none; border: none; border-bottom: 3px solid transparent;
+    padding: 10px 16px; font: inherit; font-weight: 600; color: #666; cursor: pointer; white-space: nowrap;
+}
+.tab:hover { color: #044233; }
+.tab[aria-selected="true"] { color: #044233; border-bottom-color: #C3985E; }
+
+/* ---- month / filter controls ---- */
+.toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.month-label { font-weight: 700; color: #044233; min-width: 150px; text-align: center; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.chip {
+    padding: 5px 12px; border-radius: 999px; border: 1px solid #D9D2C3; background: #fff;
+    font: inherit; font-size: 13px; cursor: pointer; color: #444;
+}
+.chip:hover { border-color: #C3985E; }
+.chip[aria-pressed="true"] { background: #044233; border-color: #044233; color: #fff; }
+.chip-count { opacity: 0.75; margin-left: 4px; }
+
+/* ---- booking rows ---- */
+.booking { display: grid; grid-template-columns: 170px 1fr auto; gap: 8px 18px; align-items: start; }
+.booking-when { font-weight: 700; color: #044233; }
+.booking-time { font-weight: 400; color: #444; display: block; }
+.booking-service { font-weight: 600; }
+.booking-contact { font-size: 13px; color: #555; overflow-wrap: anywhere; }
+.booking-ref { font-family: Consolas, Menlo, monospace; font-size: 12px; color: #888; }
+.booking-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.booking-money { font-size: 13px; color: #444; }
+.booking-flag { border-color: #E2B4B4; background: #FFFAFA; }
+
+.badge {
+    display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+    white-space: nowrap;
+}
+.badge-ok { background: #E1F0E7; color: #175A33; }
+.badge-wait { background: #FFF1D6; color: #7A5410; }
+.badge-quiet { background: #ECEAE4; color: #555; }
+.badge-bad { background: #FBE0E0; color: #8A1F1F; }
+
+/* ---- services ---- */
+.service-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.service-meta { color: #444; font-size: 14px; }
+.service-inactive { opacity: 0.65; }
+
+/* ---- schedule ---- */
+.day-row { display: grid; grid-template-columns: 130px 1fr; gap: 6px 16px; padding: 10px 0; border-bottom: 1px solid #F0EBDD; }
+.day-row:last-child { border-bottom: none; }
+.day-blocks { display: flex; flex-direction: column; gap: 8px; }
+.block { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.block input[type="time"] { width: 130px; padding: 6px 8px; border: 2px solid #E0DACB; border-radius: 6px; font: inherit; }
+.day-closed { color: #888; font-size: 14px; }
+.list-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #F0EBDD; }
+.list-row:last-child { border-bottom: none; }
+
+/* ---- overview tiles ---- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.tile { background: #fff; border: 1px solid #E8E0D0; border-radius: 8px; padding: 16px 18px; }
+.tile-value { font-size: 28px; font-weight: 700; color: #044233; line-height: 1.1; }
+.tile-label { font-size: 13px; color: #666; margin-top: 4px; }
+.tile-bad .tile-value { color: #8A1F1F; }
+
+/* ---- toasts ---- */
+.toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: calc(100vw - 32px); }
+.toast { padding: 12px 16px; border-radius: 6px; font-size: 14px; color: #fff; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18); }
+.toast-ok { background: #044233; }
+.toast-error { background: #8A1F1F; }
+
+@media (max-width: 720px) {
+    .booking { grid-template-columns: 1fr; }
+    .booking-side { flex-direction: row; align-items: center; justify-content: space-between; }
+    .day-row { grid-template-columns: 1fr; }
+    .topbar-user { margin-left: 0; width: 100%; justify-content: space-between; }
+    .card-narrow { margin: 20px auto; }
+}
+
+/* ---- Bookings tab: quarter calendar (three months; a highlighted day shows its booking count) ---- */
+.quarter-label { min-width: 190px; }
+.quarter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; margin-bottom: 6px; }
+.qmonth-title { background: none; border: none; padding: 2px 0; font: inherit; font-weight: 700; color: #044233; cursor: pointer; text-align: left; }
+.qmonth-title:hover { text-decoration: underline; }
+.qmonth-title[aria-pressed="true"] { text-decoration: underline; text-decoration-color: #C3985E; text-decoration-thickness: 3px; text-underline-offset: 4px; }
+.qgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-top: 8px; }
+.qwd { font-size: 11px; color: #888; text-align: center; }
+.qday {
+    position: relative; display: block; aspect-ratio: 1 / 1; min-height: 34px;
+    border: 1px solid #E8E0D0; border-radius: 6px; background: transparent; padding: 0;
+    font: inherit; font-size: 12px; color: #666; text-align: left;
+}
+.qday.is-empty { border-color: transparent; }
+.qnum { position: absolute; top: 3px; left: 5px; line-height: 1; }
+.qday.is-today .qnum { font-weight: 700; text-decoration: underline; }
+button.qday.has { background: #E3EFE9; border-color: #9BC1B0; color: #044233; cursor: pointer; }
+button.qday.has:hover { border-color: #044233; }
+button.qday:focus-visible, .qmonth-title:focus-visible { outline: 2px solid #C3985E; outline-offset: 2px; }
+.qday.is-selected { box-shadow: 0 0 0 2px #C3985E; }
+.qbadge {
+    position: absolute; right: 3px; bottom: 3px; min-width: 18px; height: 18px; padding: 0 4px;
+    border-radius: 9px; background: #044233; color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+}
+.showing { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; font-size: 13px; color: #555; }
+.link-btn { background: none; border: none; padding: 0; font: inherit; font-size: 13px; color: #1B7A7E; text-decoration: underline; cursor: pointer; }
+@media (max-width: 860px) {
+    .quarter { grid-template-columns: 1fr; gap: 18px; }
+    .qgrid { max-width: 380px; }
+}

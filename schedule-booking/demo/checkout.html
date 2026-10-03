@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Demo checkout</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; background: #F7F4EE; color: #141414; }
+  .banner { background: #C3985E; color: #141414; text-align: center; padding: 10px 16px; font-weight: 700; font-size: 14px; letter-spacing: .03em; }
+  main { max-width: 480px; margin: 32px auto; padding: 0 16px; }
+  .card { background: #fff; border: 1px solid #E8E0D0; border-radius: 8px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; color: #044233; }
+  .muted { color: #666; font-size: 14px; margin: 0 0 16px; }
+  .summary { border-top: 1px solid #E8E0D0; border-bottom: 1px solid #E8E0D0; padding: 14px 0; margin: 16px 0; }
+  .summary div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 15px; }
+  .summary .total { font-weight: 700; font-size: 18px; padding-top: 8px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 4px; }
+  input { width: 100%; padding: 10px 12px; border: 1px solid #D9D2C3; border-radius: 4px; font: inherit; background: #F7F4EE; color: #666; }
+  .row { display: flex; gap: 12px; } .row > div { flex: 1; }
+  button { width: 100%; padding: 12px; margin-top: 16px; border-radius: 4px; font: inherit; font-weight: 700; cursor: pointer; }
+  .pay { background: #044233; color: #fff; border: 1px solid #044233; }
+  .decline { background: #fff; color: #9b1c1c; border: 1px solid #9b1c1c; margin-top: 10px; }
+  button:disabled { opacity: .6; cursor: default; }
+  .note { font-size: 12px; color: #666; margin-top: 14px; }
+  .error { color: #9b1c1c; font-size: 14px; margin-top: 12px; }
+  a { color: #044233; }
+</style>
+</head>
+<body>
+<div class="banner">DEMO CHECKOUT — no real payment is taken. Stands in for Paymob until the account is set up.</div>
+<main>
+  <div class="card">
+    <h1>Secure checkout</h1>
+    <p class="muted">Example Business</p>
+
+    <div class="summary" id="summary" hidden>
+      <div><span id="service"></span><span id="amount"></span></div>
+      <div class="muted" style="margin:0"><span id="when"></span></div>
+      <div class="total"><span>Total</span><span id="total"></span></div>
+    </div>
+    <p id="loading" class="muted">Loading your booking&hellip;</p>
+
+    <label for="card">Card number</label>
+    <input id="card" value="4242 4242 4242 4242" disabled>
+    <div class="row">
+      <div><label for="exp">Expiry</label><input id="exp" value="12 / 30" disabled></div>
+      <div><label for="cvc">CVC</label><input id="cvc" value="123" disabled></div>
+    </div>
+
+    <button class="pay" id="pay" disabled>Pay</button>
+    <button class="decline" id="decline" disabled>Decline (simulate a failed payment)</button>
+    <p class="error" id="error" hidden></p>
+    <p class="note">Card details above are placeholders and are never sent anywhere. <a href="mailbox.html" target="_blank" rel="noopener">Open the demo mailbox</a> to see the emails afterwards.</p>
+  </div>
+</main>
+<script>
+(function () {
+  var API = 'http://127.0.0.1:5101/demo-booking/us-central1';
+  var match = /[?&]bookingId=([A-Za-z0-9]{10,40})(?:&|$)/.exec(location.search);
+  var bookingId = match ? match[1] : null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function fail(message) { $('error').textContent = message; $('error').hidden = false; }
+  function money(amount, currency) { return currency + ' ' + (amount / 100).toFixed(2); }
+
+  if (!bookingId) { $('loading').textContent = 'No booking to pay for.'; return; }
+
+  fetch(API + '/bookingStatus?bookingId=' + encodeURIComponent(bookingId))
+    .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+    .then(function (info) {
+      $('loading').hidden = true;
+      $('summary').hidden = false;
+      $('service').textContent = info.serviceName;
+      $('amount').textContent = money(info.amount, info.currency);
+      $('total').textContent = money(info.amount, info.currency);
+      $('when').textContent = info.slotDateLabel + ', ' + info.slotTimeLabel;
+      $('pay').textContent = 'Pay ' + money(info.amount, info.currency);
+      if (info.status !== 'pending') { fail('This booking is no longer waiting for payment (' + info.status + ').'); return; }
+      $('pay').disabled = false; $('decline').disabled = false;
+    })
+    .catch(function () { $('loading').textContent = 'Could not load the booking.'; });
+
+  function finish(outcome) {
+    $('pay').disabled = true; $('decline').disabled = true;
+    fetch(API + '/demoCompletePayment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bookingId: bookingId, outcome: outcome }) })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function () { location.href = '../pages/book-a-session.html?bookingId=' + encodeURIComponent(bookingId); })
+      .catch(function () { fail('Something went wrong completing the demo payment.'); $('pay').disabled = false; $('decline').disabled = false; });
+  }
+  $('pay').addEventListener('click', function () { finish('paid'); });
+  $('decline').addEventListener('click', function () { finish('declined'); });
+})();
+</script>
+</body>
+</html>

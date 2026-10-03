@@ -1,0 +1,542 @@
+/* ===================================================================
+   Booking module: styles for the customer booking page and the manage page.
+
+   Colours are CSS variables with the defaults below, so a site changes the look
+   by setting them once, for example in its own stylesheet:
+
+       :root { --booking-primary: #0B3D91; --booking-accent: #F2A900; }
+
+   Everything is scoped to booking classes; nothing here restyles the host site.
+   =================================================================== */
+
+:root {
+    --booking-primary: #044233;   /* buttons, headings, selected states */
+    --booking-accent: #C3985E;    /* highlights, hover, focus rings */
+    --booking-text: #141414;      /* main text */
+    --booking-border: #E8E8E8;    /* field and card borders */
+    --booking-surface: #F7F4EE;   /* soft panels */
+    --booking-link: #1B7A7E;      /* text links */
+    --booking-success: #1B7A4B;   /* valid-field tick and border */
+    --booking-error: #B3261E;     /* errors */
+}
+
+/* Layout of the booking section (Step 1-3 and confirmation) */
+.booking-page-inner {
+    max-width: 1200px;
+    margin: 50px auto 0 0;
+}
+
+.booking-step {
+    margin-bottom: 50px;
+}
+
+.booking-step-label {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--booking-accent, #C3985E);
+    margin-bottom: 12px;
+}
+
+/* Buttons, scoped so they never restyle the host site's own buttons */
+.booking-page-inner .btn-primary {
+    display: inline-block;
+    background: var(--booking-primary, #044233);
+    color: #ffffff;
+    padding: 15px 40px;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.3s ease;
+}
+
+.booking-page-inner .btn-primary:hover {
+    background: var(--booking-accent, #C3985E);
+}
+
+.booking-page-inner .btn-secondary {
+    display: inline-block;
+    background: #ffffff;
+    color: var(--booking-primary, #044233);
+    padding: 15px 40px;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 14px;
+    border: 2px solid var(--booking-primary, #044233);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.3s ease;
+}
+
+.booking-page-inner .btn-secondary:hover {
+    background: var(--booking-accent, #C3985E);
+    border-color: var(--booking-accent, #C3985E);
+    color: #ffffff;
+}
+
+.booking-page-inner .btn-primary:disabled,
+.booking-page-inner .btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* Only used by the standalone templates; a real site puts the section in its own layout. */
+.booking-template-main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 24px 80px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--booking-text, #141414);
+}
+
+/* Booking page: session scheduler */
+.booking-status-text {
+    font-size: 14px;
+    color: #555;
+    line-height: 1.6;
+}
+
+.booking-status-text a {
+    color: var(--booking-link, #1B7A7E);
+    font-weight: 600;
+}
+
+.booking-status-error {
+    color: var(--booking-error, #A33);
+}
+
+.booking-status-preview {
+    color: var(--booking-accent, #C3985E);
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.booking-slots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+}
+
+.booking-slots-grid[hidden],
+.booking-selected-summary[hidden] {
+    display: none;
+}
+
+/* Service selection cards */
+.booking-service-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+
+.booking-service-grid[hidden] {
+    display: none;
+}
+
+.booking-service-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 22px 24px;
+    background: #ffffff;
+    border: 2px solid var(--booking-border, #E8E8E8);
+    border-radius: 8px;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.booking-service-card:hover,
+.booking-service-card:focus-visible {
+    border-color: var(--booking-accent, #C3985E);
+    background-color: var(--booking-surface, #F7F4EE);
+}
+
+.booking-service-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--booking-primary, #044233);
+}
+
+.booking-service-desc {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #555;
+}
+
+.booking-service-meta {
+    margin-top: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--booking-primary, #044233);
+}
+
+.booking-service-free {
+    color: var(--booking-link, #1B7A7E);
+}
+
+/* Shown after a free service confirms instantly */
+.booking-confirmation {
+    padding: 32px;
+    background: var(--booking-surface, #F7F4EE);
+    border-left: 4px solid var(--booking-accent, #C3985E);
+    border-radius: 4px;
+}
+
+.booking-confirmation-link {
+    display: inline-block;
+    margin: 6px 20px 0 0;
+    font-weight: 600;
+}
+
+/* Calendar + times side-by-side layout — note: display is only ever set on
+   the calendar's CHILDREN (.booking-calendar-header/-weekdays/-grid) and on
+   .booking-day-times-col, never on .booking-calendar or .booking-day-times
+   themselves, since those two carry the `hidden` attribute and giving a
+   hidden element its own `display` value overrides the browser's default
+   [hidden]{display:none} rule. */
+.booking-scheduler-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 420px) 1fr;
+    gap: 60px;
+    align-items: start;
+    margin-bottom: 24px;
+}
+
+.booking-calendar {
+    max-width: 420px;
+}
+
+.booking-day-times-col {
+    min-width: 0;
+}
+
+.booking-calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.booking-calendar-month-label {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--booking-primary, #044233);
+}
+
+.booking-calendar-nav-btn {
+    width: 34px;
+    height: 34px;
+    background: #ffffff;
+    border: 2px solid var(--booking-border, #E8E8E8);
+    border-radius: 6px;
+    font-size: 16px;
+    line-height: 1;
+    color: var(--booking-primary, #044233);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.booking-calendar-nav-btn:hover:not(:disabled) {
+    border-color: var(--booking-accent, #C3985E);
+    background-color: var(--booking-surface, #F7F4EE);
+}
+
+.booking-calendar-nav-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.booking-calendar-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.booking-calendar-weekdays span {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+}
+
+.booking-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+}
+
+.booking-calendar-day {
+    aspect-ratio: 1 / 1;
+    background: #ffffff;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--booking-text, #141414);
+}
+
+.booking-calendar-day.is-empty {
+    background: none;
+    border: none;
+}
+
+.booking-calendar-day.is-disabled {
+    color: #CCC;
+    cursor: not-allowed;
+}
+
+.booking-calendar-day.is-available {
+    border-color: var(--booking-border, #E8E8E8);
+    font-weight: 600;
+    color: var(--booking-primary, #044233);
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.booking-calendar-day.is-available:hover,
+.booking-calendar-day.is-available:focus-visible {
+    border-color: var(--booking-accent, #C3985E);
+    background-color: var(--booking-surface, #F7F4EE);
+}
+
+.booking-calendar-day.is-available.is-selected,
+.booking-calendar-day.is-available.is-selected:hover,
+.booking-calendar-day.is-available.is-selected:focus-visible {
+    background: var(--booking-primary, #044233);
+    border-color: var(--booking-primary, #044233);
+    color: #ffffff;
+}
+
+.booking-day-times {
+    margin-bottom: 0;
+}
+
+.booking-day-times-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--booking-primary, #044233);
+    margin-bottom: 14px;
+}
+
+.booking-slot-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 14px 16px;
+    background: #ffffff;
+    border: 2px solid var(--booking-border, #E8E8E8);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--booking-primary, #044233);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.booking-slot-btn:hover,
+.booking-slot-btn:focus-visible {
+    border-color: var(--booking-accent, #C3985E);
+    background-color: var(--booking-surface, #F7F4EE);
+}
+
+.booking-slot-btn.is-booked {
+    background: #F7F7F5;
+    border-color: var(--booking-border, #E8E8E8);
+    color: #AAA;
+    cursor: not-allowed;
+}
+
+.booking-slot-btn.is-booked:hover,
+.booking-slot-btn.is-booked:focus-visible {
+    border-color: var(--booking-border, #E8E8E8);
+    background-color: #F7F7F5;
+}
+
+.booking-slot-badge {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #999;
+}
+
+.booking-selected-summary {
+    margin-top: 20px;
+    padding: 14px 18px;
+    background: var(--booking-surface, #F7F4EE);
+    border: 1px solid var(--booking-accent, #C3985E);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--booking-primary, #044233);
+}
+
+.booking-link-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--booking-link, #1B7A7E);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.booking-link-btn:hover {
+    color: var(--booking-primary, #044233);
+}
+
+.booking-form-row {
+    margin-bottom: 20px;
+}
+
+.booking-form-row label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--booking-primary, #044233);
+    margin-bottom: 8px;
+}
+
+.booking-form-row input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 2px solid var(--booking-border, #E8E8E8);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--booking-text, #141414);
+    transition: border-color 0.3s ease;
+}
+
+.booking-form-row input:focus {
+    outline: none;
+    border-color: var(--booking-accent, #C3985E);
+}
+
+/* Email field: a tick appears inside the field once the address looks valid. */
+.booking-input-wrap {
+    position: relative;
+}
+
+.booking-input-wrap input {
+    padding-right: 46px;
+}
+
+.booking-field-tick {
+    position: absolute;
+    top: 0;
+    right: 14px;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    color: var(--booking-success, #1B7A4B);
+    pointer-events: none;
+}
+
+.booking-field-tick[hidden] {
+    display: none;
+}
+
+.booking-form-row input.is-valid {
+    border-color: var(--booking-success, #1B7A4B);
+}
+
+.booking-form-row input.is-invalid,
+.booking-form-row select.is-invalid {
+    border-color: var(--booking-error, #B3261E);
+}
+
+.booking-field-hint {
+    margin: 8px 0 0;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--booking-error, #B3261E);
+}
+
+.booking-field-hint[hidden] {
+    display: none;
+}
+
+/* Mobile field: country code picker beside the number. */
+.booking-phone-row {
+    display: flex;
+    gap: 10px;
+}
+
+.booking-phone-row select {
+    flex: 0 0 auto;
+    width: 280px;
+    max-width: 55%;
+    padding: 12px 10px;
+    border: 2px solid var(--booking-border, #E8E8E8);
+    border-radius: 6px;
+    background: #fff;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--booking-text, #141414);
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+}
+
+.booking-phone-row select:focus {
+    outline: none;
+    border-color: var(--booking-accent, #C3985E);
+}
+
+.booking-phone-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* On narrow screens the country picker gets its own line so names are never cut off. */
+@media (max-width: 600px) {
+    .booking-phone-row {
+        flex-direction: column;
+    }
+
+    .booking-phone-row select {
+
+/* Small screens */
+@media (max-width: 768px) {
+    .booking-slots-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .booking-scheduler-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+    }
+
+    .booking-calendar {
+        max-width: 100%;
+    }
+
+    .booking-calendar-day {
+        font-size: 13px;
+    }
+
+    .booking-selected-summary {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+}

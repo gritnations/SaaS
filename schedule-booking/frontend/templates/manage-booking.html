@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Manage your booking</title>
+    <link rel="stylesheet" href="../css/booking.css">
+</head>
+<body>
+    <!-- Starting point for the manage page that the confirmation email links to (cancel or reschedule). The backend builds that link from PUBLIC_SITE_ORIGIN in functions/lib/config.js and this file name. -->
+    <main class="booking-template-main">
+        <div class="booking-page-inner">
+            <p id="manage-loading" class="booking-status-text">Loading your booking&hellip;</p>
+            <p id="manage-error" class="booking-status-text booking-status-error" role="alert" hidden></p>
+
+            <div id="manage-view" hidden>
+                <div class="booking-step">
+                    <p class="booking-step-label">Your booking</p>
+                    <div class="booking-selected-summary"><span id="manage-summary"></span></div>
+                    <p id="manage-note" class="booking-status-text" style="margin-top: 16px;" hidden></p>
+                    <div id="manage-links" style="margin-top: 16px;"></div>
+
+                    <!-- (the flex layout is on an inner box: an inline display would override the hidden attribute) -->
+                    <div id="manage-actions" hidden>
+                        <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+                            <button type="button" id="manage-reschedule-btn" class="btn-primary">Reschedule</button>
+                            <button type="button" id="manage-cancel-btn" class="btn-secondary">Cancel booking</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CANCEL: an explicit confirmation, saying what will happen to their money -->
+                <div id="manage-cancel-panel" class="booking-step" hidden>
+                    <p class="booking-step-label">Cancel this booking?</p>
+                    <p id="manage-cancel-text" class="booking-status-text"></p>
+                    <p id="manage-cancel-error" class="booking-status-text booking-status-error" role="alert" hidden></p>
+                    <div style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button type="button" id="manage-cancel-yes" class="btn-primary">Yes, cancel my booking</button>
+                        <button type="button" id="manage-cancel-no" class="btn-secondary">Keep my booking</button>
+                    </div>
+                </div>
+
+                <!-- RESCHEDULE: same length, no payment -->
+                <div id="manage-reschedule-panel" class="booking-step" hidden>
+                    <p class="booking-step-label">Choose a new time</p>
+                    <p id="manage-slots-loading" class="booking-status-text">Loading available times&hellip;</p>
+                    <p id="manage-slots-error" class="booking-status-text booking-status-error" role="alert" hidden></p>
+
+                    <div class="booking-scheduler-grid">
+                        <div id="manage-calendar" class="booking-calendar" hidden>
+                            <div class="booking-calendar-header">
+                                <button type="button" id="manage-cal-prev" class="booking-calendar-nav-btn" aria-label="Previous month">&#8249;</button>
+                                <span id="manage-cal-month-label" class="booking-calendar-month-label" aria-live="polite"></span>
+                                <button type="button" id="manage-cal-next" class="booking-calendar-nav-btn" aria-label="Next month">&#8250;</button>
+                            </div>
+                            <div class="booking-calendar-weekdays" id="manage-cal-weekdays"></div>
+                            <div class="booking-calendar-grid" id="manage-cal-grid"></div>
+                        </div>
+
+                        <div class="booking-day-times-col">
+                            <p id="manage-day-times-placeholder" class="booking-status-text" hidden>Select a date to see available times.</p>
+                            <div id="manage-day-times" class="booking-day-times" hidden>
+                                <p class="booking-day-times-label" id="manage-day-times-label"></p>
+                                <p id="manage-day-times-empty" class="booking-status-text" hidden>No open times on this day &mdash; pick another date.</p>
+                                <div id="manage-slots-grid" class="booking-slots-grid"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="manage-selected-summary" class="booking-selected-summary" hidden>
+                        <span id="manage-selected-summary-text"></span>
+                        <button type="button" id="manage-change-slot-btn" class="booking-link-btn">Change</button>
+                    </div>
+
+                    <p id="manage-reschedule-error" class="booking-status-text booking-status-error" role="alert" hidden></p>
+                    <div style="margin-top: 16px; display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button type="button" id="manage-confirm-btn" class="btn-primary">Confirm new time</button>
+                        <button type="button" id="manage-reschedule-back" class="btn-secondary">Back</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESULT (after cancelling or moving) -->
+            <div id="manage-result" class="booking-confirmation" aria-live="polite" hidden>
+                <h2 id="manage-result-title" style="font-size: 32px; margin-bottom: 12px;"></h2>
+                <p id="manage-result-text" style="font-size: 16px;"></p>
+                <div id="manage-result-links"></div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Set these for your site (see frontend/README.md).
+        window.BOOKING_API_BASE = 'https://us-central1-YOUR-PROJECT.cloudfunctions.net';   // where the booking backend is deployed
+        window.BOOKING_CONTACT_EMAIL = 'contact@example.com';                              // optional: shown in error messages
+        // window.BOOKING_DEFAULT_COUNTRY = 'GB';                                          // optional: preselected phone country (ISO code)
+        // window.BOOKING_PAGE_URL = 'book-a-session.html';                                // optional: where "Book a session" links point
+    </script>
+    <script src="../js/manage-booking.js"></script>
+</body>
+</html>
