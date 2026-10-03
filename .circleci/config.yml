@@ -3,6 +3,16 @@ version: 2.1
 orbs:
   node: circleci/node@5.2.0
 
+commands:
+  https_checkout:
+    steps:
+      - run:
+          name: Checkout code via HTTPS
+          command: |
+            git clone --filter=blob:none \
+              "https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME.git" .
+            git checkout "$CIRCLE_SHA1"
+
 # The current frontend is static: there is no build or lint command, and
 # this repository has no Python package. Run the existing test suites.
 jobs:
@@ -10,7 +20,7 @@ jobs:
     docker:
       - image: cimg/node:22.22.0
     steps:
-      - checkout
+      - https_checkout
       - run:
           name: Install functions dependencies
           working_directory: schedule-booking/functions
@@ -24,7 +34,7 @@ jobs:
     docker:
       - image: cimg/node:22.22.0
     steps:
-      - checkout
+      - https_checkout
       - run:
           name: Test admin panel logic
           working_directory: schedule-booking/admin
@@ -34,7 +44,7 @@ jobs:
     docker:
       - image: cimg/openjdk:21.0
     steps:
-      - checkout
+      - https_checkout
       - node/install:
           node-version: '22.22.0'
       - run:
