@@ -5,8 +5,37 @@ Draft architecture for turning an existing single-client booking backend
 into a multi-tenant SaaS product. See `schedule-booking/SAAS_README.md` for
 what's already built and the full gap analysis this draft builds on.
 
-**Status: draft for CTO review, not yet built, not agreed.** Updated
-2026-10-01.
+**Status: the platform direction is decided. The Firebase design in this
+document is not the platform architecture.** It is kept as a record of the
+alternative that was considered. Updated 2026-10-08.
+
+## Current direction (decided by the CTO)
+
+- The platform is built in Python, behind an API, on PostgreSQL. The
+  database boundary is PostgreSQL-native and works with a Supabase-hosted
+  server. The Supabase client library is not a dependency.
+- The platform spine is `main.py` → `api/main.py` → `postgres.py`. The trust
+  path is Internet → `main.py` → `api/main.py` → bounded service →
+  `postgres.py` → PostgreSQL. The browser is untrusted and never receives a
+  database, payment or other privileged credential.
+- `main.py` holds the global ingress controls. Endpoint authorisation
+  belongs to the API, business rules to bounded services, and data
+  permissions to the database.
+- Payments are provider-neutral at the API boundary. Paymob is the first
+  provider. It is not live. A secondary provider exists as a stub to prove
+  the decoupling.
+- The existing Firebase/Node engine in `schedule-booking/` is a reference
+  implementation and an existing system. It is not migrated and not
+  modified by the platform work.
+- GitHub Actions is the authoritative CI.
+
+Not decided: the tenancy model, the booking domain schema, the
+first-release scope, hosting and runtime, and when a payment provider goes
+live.
+
+What exists on the platform today is the spine only: health, readiness and
+metrics routes, the database boundary, and the payment seam. It has no
+booking domain, no tenancy and no subscriptions.
 
 ## Context: approved direction and the CTO's blueprint
 
@@ -57,16 +86,13 @@ falling back to manual, and token-secured cancel/reschedule (~290 checks).
 Even if the platform moves to PostgreSQL, its logic and tests are a
 reference for the concurrency and schema work.
 
-**Decision needed from the CTO:** build on the Firebase engine (this draft)
-or on the PostgreSQL blueprint, and whether businesses are separated by
-project or by tenant-scoped data. The rest of this document describes the
-Firebase option.
+**Decision (CTO):** the platform is built on the PostgreSQL design, not on
+the Firebase engine. How businesses are separated is not decided. The rest
+of this document describes the Firebase option that was not chosen.
 
-**Platform note:** this draft assumes Firebase (Functions + Firestore +
-Hosting), matching the existing proven code. That's provisional — there's
-an open possibility of moving off Firebase for the SaaS version. Keeping
-Firebase as the working assumption until an alternative is decided, so
-this doesn't block on it.
+**Platform note:** everything below was written under a Firebase working
+assumption. That assumption no longer applies. Where the text below
+conflicts with "Current direction" above, "Current direction" is correct.
 
 ## Core decision: per-tenant provisioning, not shared multi-tenant database
 

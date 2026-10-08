@@ -1,0 +1,41 @@
+[project]
+name = "saas-platform"
+version = "0.1.0"
+description = "Python platform spine: ingress boundary, API and database boundary."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi==0.142.4",
+    "uvicorn==0.54.0",
+    "psycopg[binary]==3.3.6",
+    "psycopg-pool==3.3.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black==26.10.0",
+    "isort==9.0.2",
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+    "httpx2==2.13.1",
+]
+
+# Supported and CI-tested Python versions: 3.11, 3.12, 3.13 and 3.14.
+# The full pinned sets are in requirements.txt (runtime) and requirements-dev.txt (runtime + tooling).
+
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+known_first_party = ["api", "main", "payments", "postgres"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["main.py", "postgres.py", "api", "payments", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

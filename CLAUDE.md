@@ -323,22 +323,41 @@ When the acceptance criteria are met:
 
 > stop.
 
-## What this folder is
+## What this repository is
 
-Workspace for turning an existing single-client booking engine into a multi-tenant booking SaaS. **Status: architecture draft only — no multi-tenant code written yet.**
+The repository for a standalone scheduling SaaS. It holds two things: the Python platform spine, which is the foundation being built, and the existing Firebase/Node booking engine, which is a reference implementation and an existing system.
 
-- `ARCHITECTURE.md` — the SaaS design draft. Key decision already made: **automated per-tenant provisioning** (one Firebase project per tenant, driven by a control plane), *not* a shared `businessId`-scoped database. Firebase is the working assumption but explicitly open to revisit. Read its "Open questions" section before proposing design changes.
-- `schedule-booking/` — the only code. Proven single-tenant engine, copied from the original client project. That project is separate: never sync or copy between it and this repo. `schedule-booking/SAAS_README.md` is the gap analysis (everything that's hardcoded per client today).
-- **Direction (approved by the founders 2026-09-30):** a standalone AI-powered scheduling, productivity and business-management SaaS, with the original client as an early pilot customer. Roles: CEO/CFO (product, pricing, go-to-market), CTO (architecture, engineering), COO (operations, delivery, marketing). Only the direction and roles are agreed; product name, customer segments, first-release scope, architecture, payment provider and pricing are still open. Treat `ARCHITECTURE.md` as input for the CTO — it is not a decision. See `README.md`.
+- **Python platform spine (root):** `main.py` → `api/main.py` → `postgres.py`, with the payment boundary in `payments/`. It has health, readiness and metrics routes and a provider-neutral payment seam. It has no booking domain, no tenancy, no subscriptions and no live payment provider.
+- `ARCHITECTURE.md` states the current platform direction, decided by the CTO, and then keeps the earlier Firebase per-tenant draft as a record of the alternative. The Firebase draft is not the platform architecture.
+- `schedule-booking/` is the existing single-tenant engine, copied from the original client project. That project is separate: never sync or copy between it and this repo. `schedule-booking/SAAS_README.md` is the gap analysis (everything that's hardcoded per client today).
+- **Direction (approved by the founders 2026-09-30):** a standalone AI-powered scheduling, productivity and business-management SaaS, with the original client as an early pilot customer. Roles: CEO/CFO (product, pricing, go-to-market), CTO (architecture, engineering), COO (operations, delivery, marketing). The platform direction is decided by the CTO: Python, an API and PostgreSQL. Product name, customer segments, first-release scope, tenancy model, hosting, payment go-live and pricing are not decided. See `README.md`.
 - **No client details or personal names in this repo.** Use neutral placeholders (`owner@example.com`, `example.com`, `your-project-id`) and roles instead of names. The pilot customer's identity, founder names and founder decisions live in the private project tracker only. Do not put tracker issue ids, project names or document titles in this repo.
-- The project tracker holds the technical definition and the competitor research. The CTO has asked that Claude own the documentation as the single source of truth, and the README principle is to keep "what exists / what is being evaluated / what has been proposed / what has been agreed" clearly apart and not duplicate founder decisions in the repo. The CTO's architecture documents describe a **different design** (serverless API + PostgreSQL + Pydantic, one logical platform with tenant-scoped data); `ARCHITECTURE.md` compares the two. Don't present the Firebase draft as the agreed architecture.
-- Payment provider is unresolved: engine and CTO blueprint use Paymob; the competitor research assumes Paylink.sa.
+- The project tracker holds the technical definition and the competitor research. The README principle is to keep "what exists / what is being evaluated / what has been proposed / what has been agreed" clearly apart and not duplicate founder decisions in the repo.
+- Payments: the boundary is provider-neutral. Paymob is the first provider and is not live. The secondary provider is a stub.
 
 ## Git
 
 This whole folder is one git repo, pushed to the public GitHub repo `gritnations/SaaS` (`main`). History in this repo starts at the baseline commit; the previous repository's history was not carried over. Commit identity is the GitHub noreply email. The GitHub CLI is installed at `D:\Tools\GitHub CLI\bin\gh.exe` (on the user PATH; in Git Bash add `/d/Tools/GitHub CLI/bin` to `PATH` if `gh` isn't found).
 
-## Commands (run from `schedule-booking/`)
+## Commands: Python platform (run from the repository root)
+
+Supported and CI-tested Python versions: 3.11, 3.12, 3.13 and 3.14.
+
+```bash
+python -m venv .venv && .venv/Scripts/python -m pip install -r requirements-dev.txt   # Linux/macOS: .venv/bin/python
+python -m pytest -q                                          # tests; no database or credentials needed
+python -m black --check main.py postgres.py api payments tests
+python -m isort --check-only main.py postgres.py api payments tests
+python -m mypy                                               # strict; file list is in pyproject.toml
+APP_ENV=development uvicorn main:app --no-server-header      # http://127.0.0.1:8000
+npm ci && npm run lint                                       # ESLint, Prettier and Markdown lint on new surfaces
+```
+
+Environment variables: `APP_ENV` (`production` by default, `development`, `test`), `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL` (secret), `DATABASE_POOL_MAX_SIZE`, `METRICS_TOKEN` (secret). None has a value in this repository.
+
+Every module, class and function in the platform has a docstring. `tests/test_docstrings.py` enforces it.
+
+## Commands: existing engine (run from `schedule-booking/`)
 
 ```bash
 cd functions && npm install && npm test   # ~290 checks, plain node, no emulator/credentials
@@ -349,15 +368,15 @@ node demo/run-demo.js                     # full local demo (emulators + fake Pa
 node frontend/sync-to-site.js <site> --with-pages   # copy customer frontend into a website folder
 ```
 
-No build step, no linter. Tests use a hand-rolled `check(name, cond)` harness; Firestore logic is tested against the in-memory stand-in `functions/test/fakeFirestore.js` (models transactions' all-or-nothing writes, not concurrency). New test files must be added to the `test` script chain in `functions/package.json`.
+The engine has no build step and no linter. Tests use a hand-rolled `check(name, cond)` harness; Firestore logic is tested against the in-memory stand-in `functions/test/fakeFirestore.js` (models transactions' all-or-nothing writes, not concurrency). New test files must be added to the `test` script chain in `functions/package.json`.
 
 Note: `demo/run-demo.js` expects the customer site at `../Website-online-booking` (sibling of `schedule-booking/`), which is **not** present in this SaaS workspace — the demo won't fully run here without it. `.firebaserc` is gitignored and absent.
 
-## Architecture (booking engine)
+## Existing engine architecture (reference)
 
 Three deployable parts in one Firebase project, no framework anywhere:
 
-- **`functions/`** — Cloud Functions v2, Node 22, CommonJS, `us-central1`. `index.js` is thin HTTP/PubSub/scheduler wiring; logic lives in `lib/`. `lib/availability.js` is pure (no I/O) slot/overlap math; `lib/bookings.js` does reservations/expiry in Firestore transactions; `lib/confirmation.js` is the single "booking became confirmed" step shared by the free and paid paths; `lib/refundPolicy.js` is the *only* place cancellation rules may go.
+- **`functions/`** — Cloud Functions v2, Node 22, CommonJS, `us-central1`. `index.js` is thin HTTP/PubSub/scheduler wiring; logic lives in `lib/`. `lib/availability.js` is pure (no I/O) slot/overlap math; `lib/bookings.js` does reservations/expiry in Firestore transactions; `lib/confirmation.js` is the single "booking became confirmed" step shared by the free and paid paths; `lib/refundPolicy.js` is the _only_ place cancellation rules may go.
 - **`admin/`** — static ES-module SPA on Firebase Hosting, Firebase Auth email/password, reads/writes Firestore directly. **`firestore.rules` is the real authorization boundary**; the UI is convenience. Rules deliberately allow admins only narrow single-field transitions (`confirmed→no_show`, `refundStatus→refunded_manually`, `paid_slot_conflict→refunded`); cancel/refund must go through the `adminCancelBooking` function, never a browser write.
 - **`frontend/`** — customer booking + manage pages, themeable via `--booking-*` CSS vars. Source of truth; sites get copies via `sync-to-site.js`. Elements found by `id`; all text inserted via `textContent`, never HTML.
 
@@ -369,9 +388,9 @@ Demo mode (`lib/gateways/mock.js`, `demoOutbox`, `demoCompletePayment`/`demoMail
 
 `lib/gateways/paymob.js` and `lib/hmacUtil.js` are **copies** of `Shared/payments-gateway-module` — the shared module is the upstream. Paymob calls (incl. refunds) are written from docs and unverified against a real account.
 
-## Per-tenant values currently hardcoded (the SaaS seam)
+## Per-tenant values hardcoded in the existing engine
 
-These are what the control plane would need to inject; they must stay in sync by hand today:
+These must stay in sync by hand in the engine today:
 
 - `functions/lib/config.js` — `ADMIN_EMAILS`, `ADMIN_ORIGINS`, `ALLOWED_ORIGINS`, `PUBLIC_SITE_ORIGIN`, `CALENDAR_OWNER_EMAIL`, `CURRENCY` (SAR, amounts in halalas), `TIMEZONE`/`TIMEZONE_OFFSET` (Asia/Riyadh, fixed +03:00).
 - `firestore.rules` `isAdmin()` email list — **must equal `ADMIN_EMAILS`**.

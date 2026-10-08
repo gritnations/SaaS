@@ -1,0 +1,12 @@
+# Prettier is scoped to the new and changed platform surfaces.
+# Inherited files are excluded so that this tooling causes no mass reformat.
+schedule-booking/
+.circleci/
+.github/
+.venv/
+node_modules/
+package-lock.json
+ARCHITECTURE.md
+GATE_RECORD.md
+README.md
+LICENSE
