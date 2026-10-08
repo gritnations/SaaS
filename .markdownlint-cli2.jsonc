@@ -1,0 +1,10 @@
+{
+  // Markdown lint is scoped to the documents this platform work owns.
+  // Inherited documents are not linted yet, to avoid a mass repair.
+  "globs": ["CLAUDE.md"],
+  "config": {
+    "default": true,
+    // Line length is left to Prettier.
+    "MD013": false,
+  },
+}
