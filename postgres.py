@@ -155,7 +155,7 @@ class DatabaseSettings:
         raw_size = env.get(POOL_MAX_SIZE_ENV, "").strip()
         if not raw_size:
             pool_max_size = DEFAULT_POOL_MAX_SIZE
-        elif raw_size.isdigit() and 1 <= int(raw_size) <= MAX_POOL_MAX_SIZE:
+        elif raw_size.isascii() and raw_size.isdigit() and 1 <= int(raw_size) <= MAX_POOL_MAX_SIZE:
             pool_max_size = int(raw_size)
         else:
             raise DatabaseConfigError(f"{POOL_MAX_SIZE_ENV} must be a whole number from 1 to {MAX_POOL_MAX_SIZE}.")

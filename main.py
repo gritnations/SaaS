@@ -115,7 +115,7 @@ async def ingress_guard(request: Request, call_next: Callable[[Request], Awaitab
     length = request.headers.get("content-length")
     if request.method in BODY_METHODS and length is None:
         response: Response = error_response(411, "A Content-Length header is required.")
-    elif length is not None and not length.isdigit():
+    elif length is not None and not (length.isascii() and length.isdigit()):
         response = error_response(400, "Invalid Content-Length.")
     elif length is not None and int(length) > MAX_BODY_BYTES:
         response = error_response(413, "Request body is too large.")

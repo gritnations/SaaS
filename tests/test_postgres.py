@@ -63,7 +63,7 @@ def test_an_unparseable_string_is_refused_without_leaking_it() -> None:
     assert USER not in str(caught.value)
 
 
-@pytest.mark.parametrize("size", ["0", "21", "many", "-1", "1.5"])
+@pytest.mark.parametrize("size", ["0", "21", "many", "-1", "1.5", "²", "٢"])
 def test_an_invalid_pool_size_is_refused(size: str) -> None:
     """A pool size outside 1 to 20, or not a whole number, is refused."""
     with pytest.raises(DatabaseConfigError):

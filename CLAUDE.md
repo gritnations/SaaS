@@ -344,7 +344,9 @@ This whole folder is one git repo, pushed to the public GitHub repo `gritnations
 Supported and CI-tested Python versions: 3.11, 3.12, 3.13 and 3.14.
 
 ```bash
-python -m venv .venv && .venv/Scripts/python -m pip install -r requirements-dev.txt   # Linux/macOS: .venv/bin/python
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements-dev.txt   # Windows
+.venv/bin/python -m pip install -r requirements-dev.txt       # Linux/macOS
 python -m pytest -q                                          # tests; no database or credentials needed
 python -m black --check main.py postgres.py api payments tests
 python -m isort --check-only main.py postgres.py api payments tests

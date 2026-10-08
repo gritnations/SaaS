@@ -101,6 +101,16 @@ def test_a_body_without_a_declared_length_is_refused() -> None:
     assert response.status_code == 411
 
 
+@pytest.mark.parametrize("length", ["-500", "²"])
+def test_an_invalid_content_length_is_refused_with_security_headers(length: str) -> None:
+    """Invalid lengths receive a controlled 400 with every security header."""
+    response = build_client().get("/health", headers={b"Content-Length": length.encode("latin-1")})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid Content-Length."}
+    for name, value in SECURITY_HEADERS.items():
+        assert response.headers[name] == value
+
+
 def test_an_unhandled_error_is_generic_and_carries_the_headers() -> None:
     """An unexpected fault becomes a plain 500 that shows nothing internal."""
     database = FakeDatabase(fail_with=RuntimeError("password=hunter2 host=db.internal"))
