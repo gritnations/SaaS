@@ -100,9 +100,10 @@ async def on_unhandled_error(request: Request, exc: Exception) -> JSONResponse:
 async def ingress_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Apply the global request limits, controlled error handling and security headers.
 
-    A request with a body must declare its length, and the length must not exceed
-    :data:`MAX_BODY_BYTES`. An error raised by the ingress layer itself becomes a generic 500. Errors
-    raised inside the API are handled by :func:`on_unhandled_error`.
+    POST, PUT and PATCH requests without ``Content-Length`` receive 411. On any method, a
+    non-digit length receives 400 and a declared length above :data:`MAX_BODY_BYTES` receives 413.
+    Only the declared length is checked; the body is not measured. Exceptions from ``call_next``
+    become a generic 500. Errors raised inside the API are handled by :func:`on_unhandled_error`.
 
     Args:
         request: The incoming request.
@@ -140,8 +141,9 @@ def create_app(environ: Mapping[str, str] | None = None, api: FastAPI | None = N
         The root application, with the API mounted at ``/``.
 
     Raises:
-        IngressConfigError: If a wildcard host or origin is configured, or an origin is not an
-            ``http://`` or ``https://`` origin without a trailing slash.
+        IngressConfigError: If a bare wildcard host is configured, or an origin contains a wildcard,
+            lacks an ``http://`` or ``https://`` prefix, or ends with a slash.
+        api.main.ApiConfigError: If no API is supplied and ``APP_ENV`` or ``METRICS_TOKEN`` is invalid.
     """
     env = os.environ if environ is None else environ
     hosts = read_list(env, ALLOWED_HOSTS_ENV) or list(DEFAULT_ALLOWED_HOSTS)

@@ -118,7 +118,9 @@ class DatabaseSettings:
         """Build settings from environment variables.
 
         Reads ``DATABASE_URL`` (required) and ``DATABASE_POOL_MAX_SIZE`` (optional). A connection string
-        with no ``sslmode`` gets ``require``. A weaker mode is refused, as is a string with no host.
+        with no ``sslmode`` gets ``require``; only ``require``, ``verify-ca`` and ``verify-full``
+        are accepted. Either ``host`` or ``hostaddr`` is required. The pool size defaults to 4, and
+        ``connect_timeout`` defaults to 5 seconds if absent from the connection string.
 
         Args:
             environ: The mapping to read. ``None`` means the process environment.
@@ -175,7 +177,7 @@ class Database:
 
         Args:
             settings: Validated configuration from :meth:`DatabaseSettings.from_env`.
-            timeout_seconds: How long to wait for a connection before giving up.
+            timeout_seconds: Maximum wait for a pooled connection, in seconds; not a query timeout.
         """
         _install_log_redaction()
         self._timeout = timeout_seconds
@@ -209,14 +211,16 @@ class Database:
         """Borrow a connection for the length of a ``with`` block.
 
         The transaction commits when the block ends normally and rolls back if it raises. The
-        connection then returns to the pool.
+        connection then returns to the pool. Errors from the block or transaction cleanup propagate
+        without conversion.
 
         Yields:
             A typed psycopg connection.
 
         Raises:
-            DatabaseUnavailableError: If no connection can be obtained in time. Errors raised by the
-                caller's own statements inside the block are not converted. They propagate unchanged.
+            DatabaseUnavailableError: If the boundary is closed, acquisition times out, or a driver or
+                OS error prevents acquiring a connection.
+            psycopg.Error: Driver errors from statements in the block or transaction cleanup.
         """
         with ExitStack() as stack:
             try:
@@ -230,7 +234,8 @@ class Database:
     def is_healthy(self) -> bool:
         """Report whether the database answers a trivial query.
 
-        Runs ``SELECT 1``. It never raises, and it reveals nothing about why a check failed.
+        Runs ``SELECT 1``. Connection unavailability and psycopg errors become ``False``; other
+        exceptions propagate. The return value reveals no failure details.
 
         Returns:
             ``True`` if the database answered correctly, otherwise ``False``.

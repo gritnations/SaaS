@@ -160,10 +160,10 @@ def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
         environ: The mapping to read.
 
     Returns:
-        The token, or ``None`` if it is not set.
+        The token with surrounding whitespace removed, or ``None`` if absent or blank.
 
     Raises:
-        ApiConfigError: If a token is set but is shorter than 32 characters.
+        ApiConfigError: If a nonblank token is shorter than 32 characters after trimming.
     """
     token = environ.get(METRICS_TOKEN_ENV, "").strip()
     if not token:
@@ -193,7 +193,7 @@ def database_from_environment(environ: Mapping[str, str]) -> Database | None:
     """Build the database boundary, or report that it is not configured.
 
     A missing or unsafe configuration does not stop the API from starting. Liveness stays up and
-    readiness reports ``not_ready`` until the configuration is corrected.
+    readiness reports ``not_ready``. The API must be rebuilt after correcting the configuration.
 
     Args:
         environ: The mapping to read.
@@ -242,7 +242,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
 
     @api.middleware("http")
     async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        """Count every response for ``/metrics``.
+        """Count responses returned by the next handler for ``/metrics``.
+
+        Exceptions from the next handler propagate without incrementing the counter.
 
         Args:
             request: The incoming request.
@@ -306,8 +308,11 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
             response: Used to set the 503 status when not ready.
 
         Returns:
-            ``{"status": "ready"}`` with 200, or ``{"status": "not_ready"}`` with 503. The reason is
-            logged on the server and never returned.
+            ``{"status": "ready"}`` with 200 if the probe reports healthy, or
+            ``{"status": "not_ready"}`` with 503 if it is absent or reports unhealthy.
+
+        Raises:
+            Exception: Errors from the probe propagate to the application error handler.
         """
         if probe is not None and probe.is_healthy():
             return StatusOut(status="ready")
@@ -379,6 +384,8 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         Raises:
             HTTPException: 404 for an unknown provider. 501 when the provider is not live. 400 when the
                 adapter rejects the notification.
+            TypeError: Propagated from the stub adapter for an array or object status with a valid
+                order reference; the application error handler converts this to a generic 500.
         """
         adapter = provider_for(provider)
         headers = {name.lower(): value for name, value in request.headers.items()}

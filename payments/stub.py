@@ -42,7 +42,8 @@ class StubProvider:
         """Parse a stub notification.
 
         The body must be a JSON object with exactly an ``order_reference`` and a ``status`` of ``"paid"``
-        or ``"failed"``.
+        or ``"failed"``. The reference must pass :func:`is_valid_order_reference`. No signature is
+        verified.
 
         Args:
             headers: The request headers. Unused, because the stub has no signature.
@@ -52,7 +53,9 @@ class StubProvider:
             The parsed event, with ``live`` set to ``False``.
 
         Raises:
-            WebhookRejectedError: If the body is not that JSON object.
+            WebhookRejectedError: If JSON decoding fails, fields or the reference are invalid, or a
+                hashable status is neither ``"paid"`` nor ``"failed"``.
+            TypeError: If the reference is valid but the status is a JSON array or object.
         """
         try:
             payload = json.loads(body)
