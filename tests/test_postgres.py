@@ -1,10 +1,8 @@
 """Tests for the database boundary. No real PostgreSQL server is used.
 
-What these tests establish: configuration is validated, encryption is
-required, nothing connects before first use, and an unreachable database fails
-safely without leaking a credential. What they do not establish: a successful
-connection, a successful query, or certificate verification against a real
-server.
+What these tests establish: configuration is validated, encryption is required, nothing connects before
+first use, and an unreachable database fails safely without leaking a credential. What they do not
+establish: a successful connection, a successful query, or certificate verification against a real server.
 """
 
 import logging
@@ -21,14 +19,10 @@ from postgres import (
 SECRET = "s3cr3t-pw"
 USER = "db_user_x"
 UNREACHABLE = f"postgresql://{USER}:{SECRET}@127.0.0.1:1/appdb"
-"""A connection string that points at a closed local port, so that every attempt
-is refused at once.
-"""
+"""A connection string that points at a closed local port, so that every attempt is refused at once."""
 
 UNKNOWN_HOST = f"postgresql://{USER}:{SECRET}@no-such-host.invalid:5432/appdb"
-"""A connection string whose host can never resolve. The ``.invalid`` domain is
-reserved for this.
-"""
+"""A connection string whose host can never resolve. The ``.invalid`` domain is reserved for this."""
 
 
 def test_missing_configuration_fails_clearly() -> None:
@@ -42,9 +36,7 @@ def test_missing_configuration_fails_clearly() -> None:
 def test_an_unencrypted_mode_is_refused_without_leaking_the_string(
     mode: str,
 ) -> None:
-    """A mode that permits an unencrypted connection is refused, and the error
-    holds no credential.
-    """
+    """A mode that permits an unencrypted connection is refused, and the error holds no credential."""
     with pytest.raises(DatabaseConfigError) as caught:
         DatabaseSettings.from_env(
             {"DATABASE_URL": f"{UNREACHABLE}?sslmode={mode}"}
@@ -69,9 +61,7 @@ def test_a_secure_mode_is_kept(mode: str) -> None:
 
 
 def test_a_string_without_a_host_is_refused() -> None:
-    """A connection string that names no host is refused, because it would not
-    use TLS.
-    """
+    """A connection string that names no host is refused, because it would not use TLS."""
     with pytest.raises(DatabaseConfigError):
         DatabaseSettings.from_env({"DATABASE_URL": "dbname=appdb user=someone"})
 
@@ -117,11 +107,11 @@ def test_settings_do_not_show_the_secret_when_printed() -> None:
 
 
 def test_creating_the_database_opens_nothing() -> None:
-    """Constructing the boundary does not open the pool. It would fail here if it
-    tried to connect.
-    """
-    database = Database(DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE}))
-    assert database._pool.closed is True  # noqa: SLF001
+    """Constructing the boundary does not open the pool. It would fail here if it tried to connect."""
+    database = Database(
+        DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE})
+    )
+    assert database._pool.closed is True
     database.close()
 
 
@@ -129,11 +119,9 @@ def test_creating_the_database_opens_nothing() -> None:
 def test_an_unreachable_database_fails_safely_and_leaks_nothing(
     url: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """An unreachable database is unhealthy, raises a fixed error, and no log or
-    error holds a credential.
+    """An unreachable database is unhealthy, raises a fixed error, and no log or error holds a credential.
 
-    The unknown-host case matters: without redaction the connection pool logs
-    the host name.
+    The unknown-host case matters: without redaction the connection pool logs the host name.
     """
     caplog.set_level(logging.DEBUG)
     database = Database(
@@ -159,9 +147,7 @@ def test_an_unreachable_database_fails_safely_and_leaks_nothing(
 
 
 def test_a_closed_database_is_unavailable() -> None:
-    """After ``close`` the boundary refuses to hand out a connection and reports
-    unhealthy.
-    """
+    """After ``close`` the boundary refuses to hand out a connection and reports unhealthy."""
     database = Database(
         DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE}),
         timeout_seconds=0.5,
