@@ -38,9 +38,7 @@ def test_an_unencrypted_mode_is_refused_without_leaking_the_string(
 ) -> None:
     """A mode that permits an unencrypted connection is refused, and the error holds no credential."""
     with pytest.raises(DatabaseConfigError) as caught:
-        DatabaseSettings.from_env(
-            {"DATABASE_URL": f"{UNREACHABLE}?sslmode={mode}"}
-        )
+        DatabaseSettings.from_env({"DATABASE_URL": f"{UNREACHABLE}?sslmode={mode}"})
     assert SECRET not in str(caught.value)
     assert USER not in str(caught.value)
 
@@ -54,9 +52,7 @@ def test_encryption_is_required_when_no_mode_is_given() -> None:
 @pytest.mark.parametrize("mode", ["require", "verify-ca", "verify-full"])
 def test_a_secure_mode_is_kept(mode: str) -> None:
     """A secure mode chosen by the operator is preserved."""
-    settings = DatabaseSettings.from_env(
-        {"DATABASE_URL": f"{UNREACHABLE}?sslmode={mode}"}
-    )
+    settings = DatabaseSettings.from_env({"DATABASE_URL": f"{UNREACHABLE}?sslmode={mode}"})
     assert f"sslmode={mode}" in settings.conninfo
 
 
@@ -78,25 +74,13 @@ def test_an_unparseable_string_is_refused_without_leaking_it() -> None:
 def test_an_invalid_pool_size_is_refused(size: str) -> None:
     """A pool size outside 1 to 20, or not a whole number, is refused."""
     with pytest.raises(DatabaseConfigError):
-        DatabaseSettings.from_env(
-            {"DATABASE_URL": UNREACHABLE, "DATABASE_POOL_MAX_SIZE": size}
-        )
+        DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE, "DATABASE_POOL_MAX_SIZE": size})
 
 
 def test_the_pool_size_is_read() -> None:
     """A valid pool size is used, and the default is 4."""
-    assert (
-        DatabaseSettings.from_env(
-            {"DATABASE_URL": UNREACHABLE, "DATABASE_POOL_MAX_SIZE": "7"}
-        ).pool_max_size
-        == 7
-    )
-    assert (
-        DatabaseSettings.from_env(
-            {"DATABASE_URL": UNREACHABLE}
-        ).pool_max_size
-        == 4
-    )
+    assert DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE, "DATABASE_POOL_MAX_SIZE": "7"}).pool_max_size == 7
+    assert DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE}).pool_max_size == 4
 
 
 def test_settings_do_not_show_the_secret_when_printed() -> None:
@@ -108,25 +92,19 @@ def test_settings_do_not_show_the_secret_when_printed() -> None:
 
 def test_creating_the_database_opens_nothing() -> None:
     """Constructing the boundary does not open the pool. It would fail here if it tried to connect."""
-    database = Database(
-        DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE})
-    )
+    database = Database(DatabaseSettings.from_env({"DATABASE_URL": UNREACHABLE}))
     assert database._pool.closed is True
     database.close()
 
 
 @pytest.mark.parametrize("url", [UNREACHABLE, UNKNOWN_HOST])
-def test_an_unreachable_database_fails_safely_and_leaks_nothing(
-    url: str, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_an_unreachable_database_fails_safely_and_leaks_nothing(url: str, caplog: pytest.LogCaptureFixture) -> None:
     """An unreachable database is unhealthy, raises a fixed error, and no log or error holds a credential.
 
     The unknown-host case matters: without redaction the connection pool logs the host name.
     """
     caplog.set_level(logging.DEBUG)
-    database = Database(
-        DatabaseSettings.from_env({"DATABASE_URL": url}), timeout_seconds=1.0
-    )
+    database = Database(DatabaseSettings.from_env({"DATABASE_URL": url}), timeout_seconds=1.0)
     try:
         assert database.is_healthy() is False
         with pytest.raises(DatabaseUnavailableError) as caught:
@@ -136,10 +114,7 @@ def test_an_unreachable_database_fails_safely_and_leaks_nothing(
         database.close()
     assert str(caught.value) == "The database is unavailable."
     assert caught.value.__cause__ is None
-    logged = (
-        "\n".join(record.getMessage() for record in caplog.records)
-        + caplog.text
-    )
+    logged = "\n".join(record.getMessage() for record in caplog.records) + caplog.text
     assert "database pool event (details withheld)" in logged
     for forbidden in (SECRET, USER, "127.0.0.1", "no-such-host", "appdb"):
         assert forbidden not in logged

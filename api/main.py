@@ -99,9 +99,7 @@ class CheckoutBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    order_reference: Annotated[
-        str, StringConstraints(pattern=ORDER_REFERENCE_PATTERN)
-    ]
+    order_reference: Annotated[str, StringConstraints(pattern=ORDER_REFERENCE_PATTERN)]
 
 
 class CheckoutOut(BaseModel):
@@ -151,9 +149,7 @@ def resolve_environment(environ: Mapping[str, str]) -> str:
     """
     value = environ.get(APP_ENV_VAR, "").strip().lower() or "production"
     if value not in ENVIRONMENTS:
-        raise ApiConfigError(
-            f"{APP_ENV_VAR} must be one of: {', '.join(ENVIRONMENTS)}."
-        )
+        raise ApiConfigError(f"{APP_ENV_VAR} must be one of: {', '.join(ENVIRONMENTS)}.")
     return value
 
 
@@ -173,9 +169,7 @@ def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
     if not token:
         return None
     if len(token) < MIN_METRICS_TOKEN_LENGTH:
-        raise ApiConfigError(
-            f"{METRICS_TOKEN_ENV} must be at least {MIN_METRICS_TOKEN_LENGTH} characters."
-        )
+        raise ApiConfigError(f"{METRICS_TOKEN_ENV} must be at least {MIN_METRICS_TOKEN_LENGTH} characters.")
     return token
 
 
@@ -250,9 +244,7 @@ def create_api(
     api.state.environment = environment
 
     @api.middleware("http")
-    async def count_responses(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
+    async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         """Count responses returned by the next handler for ``/metrics``.
 
         Exceptions from the next handler propagate without incrementing the counter.
@@ -269,9 +261,7 @@ def create_api(
         return response
 
     @api.exception_handler(RequestValidationError)
-    async def on_invalid_request(
-        request: Request, exc: RequestValidationError
-    ) -> JSONResponse:
+    async def on_invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
         """Answer an invalid request without echoing what was sent.
 
         Args:
@@ -283,9 +273,7 @@ def create_api(
         """
         problems = [
             {
-                "field": ".".join(str(part) for part in error["loc"][1:])[
-                    :64
-                ],
+                "field": ".".join(str(part) for part in error["loc"][1:])[:64],
                 "problem": str(error["type"]),
             }
             for error in exc.errors()[:10]
@@ -310,9 +298,7 @@ def create_api(
         try:
             return registry.get(name)
         except UnknownProviderError:
-            raise HTTPException(
-                status_code=404, detail="Unknown payment provider."
-            ) from None
+            raise HTTPException(status_code=404, detail="Unknown payment provider.") from None
 
     @api.get("/health", response_model=StatusOut)
     def health() -> StatusOut:
@@ -364,22 +350,14 @@ def create_api(
         if environment == "production":
             if metrics_token is None:
                 raise HTTPException(status_code=404, detail="Not Found")
-            supplied = (
-                authorization[7:]
-                if authorization and authorization.startswith("Bearer ")
-                else ""
-            )
-            if not hmac.compare_digest(
-                supplied.encode(), metrics_token.encode()
-            ):
+            supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
+            if not hmac.compare_digest(supplied.encode(), metrics_token.encode()):
                 raise HTTPException(
                     status_code=401,
                     detail="Unauthorized",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-        return PlainTextResponse(
-            metrics.render(), media_type=METRICS_MEDIA_TYPE
-        )
+        return PlainTextResponse(metrics.render(), media_type=METRICS_MEDIA_TYPE)
 
     @api.post("/payments/{provider}/checkout", response_model=CheckoutOut)
     def checkout(provider: ProviderName, body: CheckoutBody) -> CheckoutOut:
@@ -399,9 +377,7 @@ def create_api(
         try:
             session = adapter.create_checkout(body.order_reference)
         except ProviderNotLiveError:
-            raise HTTPException(
-                status_code=501, detail="This payment provider is not live."
-            ) from None
+            raise HTTPException(status_code=501, detail="This payment provider is not live.") from None
         return CheckoutOut(
             provider=session.provider,
             order_reference=session.order_reference,
@@ -429,27 +405,18 @@ def create_api(
                adapter rejects the notification.
         """
         adapter = provider_for(provider)
-        headers = {
-            name.lower(): value for name, value in request.headers.items()
-        }
+        headers = {name.lower(): value for name, value in request.headers.items()}
         try:
             event = adapter.parse_webhook(headers, await request.body())
         except ProviderNotLiveError:
-            raise HTTPException(
-                status_code=501, detail="This payment provider is not live."
-            ) from None
+            raise HTTPException(status_code=501, detail="This payment provider is not live.") from None
         except WebhookRejectedError:
-            raise HTTPException(
-                status_code=400, detail="Webhook rejected."
-            ) from None
+            raise HTTPException(status_code=400, detail="Webhook rejected.") from None
         LOGGER.info(
             "payment notification accepted provider=%s live=%s",
             event.provider,
             event.live,
         )
-        return WebhookOut(
-            accepted=True, provider=event.provider, live=event.live
-        )
- 
+        return WebhookOut(accepted=True, provider=event.provider, live=event.live)
 
     return api

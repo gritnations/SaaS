@@ -63,9 +63,7 @@ def test_metrics_refuse_a_missing_or_wrong_token_in_production(
 ) -> None:
     """In production a missing, malformed or wrong token is refused with 401."""
     headers = {} if header is None else {"Authorization": header}
-    response = build_client(APP_ENV="production", METRICS_TOKEN=TOKEN).get(
-        "/metrics", headers=headers
-    )
+    response = build_client(APP_ENV="production", METRICS_TOKEN=TOKEN).get("/metrics", headers=headers)
     assert response.status_code == 401
     assert "platform_info" not in response.text
 
@@ -73,9 +71,7 @@ def test_metrics_refuse_a_missing_or_wrong_token_in_production(
 def test_metrics_accept_the_right_token_in_production() -> None:
     """In production the configured bearer token unlocks the metrics."""
     client = build_client(APP_ENV="production", METRICS_TOKEN=TOKEN)
-    response = client.get(
-        "/metrics", headers={"Authorization": f"Bearer {TOKEN}"}
-    )
+    response = client.get("/metrics", headers={"Authorization": f"Bearer {TOKEN}"})
     assert response.status_code == 200
     assert "platform_uptime_seconds" in response.text
 
@@ -83,9 +79,7 @@ def test_metrics_accept_the_right_token_in_production() -> None:
 def test_a_short_metrics_token_is_refused_at_start() -> None:
     """A token under 32 characters stops the API from being built."""
     with pytest.raises(ApiConfigError) as caught:
-        create_api(
-            {"APP_ENV": "production", "METRICS_TOKEN": "short-token-value"}
-        )
+        create_api({"APP_ENV": "production", "METRICS_TOKEN": "short-token-value"})
     assert "short-token-value" not in str(caught.value)
 
 
@@ -99,48 +93,28 @@ def test_a_missing_environment_means_production() -> None:
     """With ``APP_ENV`` unset the API behaves as production: no schema and no stub provider."""
     client = build_client(APP_ENV="")
     assert client.get("/openapi.json").status_code == 404
-    assert (
-        client.post(
-            "/payments/stub/checkout", json={"order_reference": "order-123"}
-        ).status_code
-        == 404
-    )
+    assert client.post("/payments/stub/checkout", json={"order_reference": "order-123"}).status_code == 404
 
 
 def test_the_schema_is_served_only_in_development() -> None:
     """The OpenAPI schema exists in development and nowhere else."""
-    assert (
-        build_client(APP_ENV="development").get("/openapi.json").status_code
-        == 200
-    )
+    assert build_client(APP_ENV="development").get("/openapi.json").status_code == 200
     assert build_client(APP_ENV="test").get("/openapi.json").status_code == 404
-    assert (
-        build_client(APP_ENV="production").get("/openapi.json").status_code
-        == 404
-    )
+    assert build_client(APP_ENV="production").get("/openapi.json").status_code == 404
 
 
 def test_paymob_is_not_live() -> None:
     """Paymob refuses both a checkout and a notification with 501."""
     client = build_client()
-    assert (
-        client.post(
-            "/payments/paymob/checkout", json={"order_reference": "order-123"}
-        ).status_code
-        == 501
-    )
-    notification = client.post(
-        "/payments/paymob/webhook", content=b'{"anything": true}'
-    )
+    assert client.post("/payments/paymob/checkout", json={"order_reference": "order-123"}).status_code == 501
+    notification = client.post("/payments/paymob/webhook", content=b'{"anything": true}')
     assert notification.status_code == 501
 
 
 def test_the_stub_goes_through_the_same_routes() -> None:
     """The stub provider answers through the same routes, which proves the routes are provider-neutral."""
     client = build_client()
-    checkout = client.post(
-        "/payments/stub/checkout", json={"order_reference": "order-123"}
-    )
+    checkout = client.post("/payments/stub/checkout", json={"order_reference": "order-123"})
     assert checkout.status_code == 200
     assert checkout.json() == {
         "provider": "stub",
@@ -164,12 +138,7 @@ def test_the_stub_goes_through_the_same_routes() -> None:
 def test_the_stub_is_absent_in_production() -> None:
     """In production the stub is not registered, so its routes answer 404."""
     client = build_client(APP_ENV="production")
-    assert (
-        client.post(
-            "/payments/stub/checkout", json={"order_reference": "order-123"}
-        ).status_code
-        == 404
-    )
+    assert client.post("/payments/stub/checkout", json={"order_reference": "order-123"}).status_code == 404
     assert (
         client.post(
             "/payments/stub/webhook",
@@ -181,12 +150,7 @@ def test_the_stub_is_absent_in_production() -> None:
 
 def test_an_unknown_provider_is_not_found() -> None:
     """A provider name that is not registered answers 404."""
-    assert (
-        build_client()
-        .post("/payments/other/checkout", json={"order_reference": "order-123"})
-        .status_code
-        == 404
-    )
+    assert build_client().post("/payments/other/checkout", json={"order_reference": "order-123"}).status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -221,9 +185,4 @@ def test_an_invalid_checkout_body_is_refused_without_an_echo(
 )
 def test_a_malformed_stub_notification_is_rejected(content: bytes) -> None:
     """A stub notification that is not the expected JSON object is refused with 400."""
-    assert (
-        build_client()
-        .post("/payments/stub/webhook", content=content)
-        .status_code
-        == 400
-    )
+    assert build_client().post("/payments/stub/webhook", content=content).status_code == 400

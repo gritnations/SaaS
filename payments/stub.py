@@ -48,9 +48,7 @@ class StubProvider:
             live=False,
         )
 
-    def parse_webhook(
-        self, headers: Mapping[str, str], body: bytes
-    ) -> PaymentEvent:
+    def parse_webhook(self, headers: Mapping[str, str], body: bytes) -> PaymentEvent:
         """Parse a stub notification.
 
         The body must be a JSON object with exactly an ``order_reference`` and a ``status`` of ``"paid"``
@@ -79,9 +77,7 @@ class StubProvider:
         }:
             raise WebhookRejectedError("unexpected fields")
         reference, status = payload["order_reference"], payload["status"]
-        if not isinstance(reference, str) or not is_valid_order_reference(
-            reference
-        ):
+        if not isinstance(reference, str) or not is_valid_order_reference(reference):
             raise WebhookRejectedError("invalid order reference")
         if not isinstance(status, str) or status not in _STATUSES:
             raise WebhookRejectedError("invalid status")
