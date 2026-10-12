@@ -3,16 +3,20 @@
 Routes:
     * ``GET /health``: process liveness. No I/O.
     * ``GET /health/ready``: infrastructure readiness. Coarse status only.
-    * ``GET /metrics``: operational metrics. Open outside production, protected or absent in production.
-    * ``POST /payments/{provider}/checkout`` and ``POST /payments/{provider}/webhook``: the
-      provider-neutral payment boundary. No provider is live.
+    * ``GET /metrics``: operational metrics. Open outside production, protected or
+      absent in production.
+    * ``POST /payments/{provider}/checkout`` and
+      ``POST /payments/{provider}/webhook``: the provider-neutral payment
+      boundary. No provider is live.
 
-This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
-``postgres`` for the database and to ``payments`` for providers.
+This module contains no SQL, no payment-provider implementation and no business
+logic. It delegates to ``postgres`` for the database and to ``payments`` for
+providers.
 
 Environment variables read:
     * ``APP_ENV``: ``production`` (the default), ``development`` or ``test``.
-    * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production. A secret.
+    * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production.
+      A secret.
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
 
 Constraints:
@@ -90,8 +94,8 @@ class StatusOut(BaseModel):
 class CheckoutBody(BaseModel):
     """The body of a checkout request.
 
-    It carries an order reference and nothing else. An amount sent by a caller is refused, because the
-    price is decided on the server.
+    It carries an order reference and nothing else. An amount sent by a caller
+    is refused, because the price is decided on the server.
 
     Attributes:
         order_reference: 6 to 64 letters, digits, hyphens or underscores.
@@ -149,7 +153,9 @@ def resolve_environment(environ: Mapping[str, str]) -> str:
     """
     value = environ.get(APP_ENV_VAR, "").strip().lower() or "production"
     if value not in ENVIRONMENTS:
-        raise ApiConfigError(f"{APP_ENV_VAR} must be one of: {', '.join(ENVIRONMENTS)}.")
+        raise ApiConfigError(
+            f"{APP_ENV_VAR} must be one of: {', '.join(ENVIRONMENTS)}."
+        )
     return value
 
 
@@ -169,7 +175,9 @@ def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
     if not token:
         return None
     if len(token) < MIN_METRICS_TOKEN_LENGTH:
-        raise ApiConfigError(f"{METRICS_TOKEN_ENV} must be at least {MIN_METRICS_TOKEN_LENGTH} characters.")
+        raise ApiConfigError(
+            f"{METRICS_TOKEN_ENV} must be at least {MIN_METRICS_TOKEN_LENGTH} characters."
+        )
     return token
 
 
@@ -180,8 +188,9 @@ def build_registry(environment: str) -> PaymentRegistry:
         environment: The value returned by :func:`resolve_environment`.
 
     Returns:
-        A registry holding Paymob everywhere, and the stub only outside production. The stub accepts
-        unsigned notifications, so it is never registered in production.
+        A registry holding Paymob everywhere, and the stub only outside production.
+        The stub accepts unsigned notifications, so it is never registered in
+        production.
     """
     providers: list[PaymentProvider] = [PaymobProvider()]
     if environment != "production":
@@ -192,15 +201,16 @@ def build_registry(environment: str) -> PaymentRegistry:
 def database_from_environment(environ: Mapping[str, str]) -> Database | None:
     """Build the database boundary, or report that it is not configured.
 
-    A missing or unsafe configuration does not stop the API from starting. Liveness stays up and
-    readiness reports ``not_ready``. The API must be rebuilt after correcting the configuration.
+    A missing or unsafe configuration does not stop the API from starting. Liveness
+    stays up and readiness reports ``not_ready``. The API must be rebuilt after
+    correcting the configuration.
 
     Args:
         environ: The mapping to read.
 
     Returns:
-        The database boundary, or ``None`` if its configuration is absent or unsafe. No connection is
-        opened here.
+        The database boundary, or ``None`` if its configuration is absent or
+        unsafe. No connection is opened here.
     """
     try:
         return Database(DatabaseSettings.from_env(environ))
@@ -209,7 +219,10 @@ def database_from_environment(environ: Mapping[str, str]) -> Database | None:
         return None
 
 
-def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProbe | None = None) -> FastAPI:
+def create_api(
+    environ: Mapping[str, str] | None = None,
+    database: ReadinessProbe | None = None,
+) -> FastAPI:
     """Build the API application.
 
     Args:
@@ -241,7 +254,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
     api.state.environment = environment
 
     @api.middleware("http")
-    async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def count_responses(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Count responses returned by the next handler for ``/metrics``.
 
         Exceptions from the next handler propagate without incrementing the counter.
@@ -258,7 +273,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         return response
 
     @api.exception_handler(RequestValidationError)
-    async def on_invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+    async def on_invalid_request(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         """Answer an invalid request without echoing what was sent.
 
         Args:
@@ -269,10 +286,16 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
             A 422 response naming each field and the kind of problem, never the submitted value.
         """
         problems = [
-            {"field": ".".join(str(part) for part in error["loc"][1:])[:64], "problem": str(error["type"])}
+            {
+                "field": ".".join(str(part) for part in error["loc"][1:])[:64],
+                "problem": str(error["type"]),
+            }
             for error in exc.errors()[:10]
         ]
-        return JSONResponse({"detail": "The request is not valid.", "problems": problems}, status_code=422)
+        return JSONResponse(
+            {"detail": "The request is not valid.", "problems": problems},
+            status_code=422,
+        )
 
     def provider_for(name: str) -> PaymentProvider:
         """Look up a provider, turning an unknown name into a 404.
@@ -289,7 +312,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         try:
             return registry.get(name)
         except UnknownProviderError:
-            raise HTTPException(status_code=404, detail="Unknown payment provider.") from None
+            raise HTTPException(
+                status_code=404, detail="Unknown payment provider."
+            ) from None
 
     @api.get("/health", response_model=StatusOut)
     def health() -> StatusOut:
@@ -320,7 +345,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         return StatusOut(status="not_ready")
 
     @api.get("/metrics", response_class=PlainTextResponse)
-    def metrics_endpoint(authorization: Annotated[str | None, Header()] = None) -> PlainTextResponse:
+    def metrics_endpoint(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> PlainTextResponse:
         """Expose operational metrics.
 
         Outside production the endpoint is open. In production it does not exist unless
@@ -339,9 +366,17 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         if environment == "production":
             if metrics_token is None:
                 raise HTTPException(status_code=404, detail="Not Found")
-            supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
+            supplied = (
+                authorization[7:]
+                if authorization and authorization.startswith("Bearer ")
+                else ""
+            )
             if not hmac.compare_digest(supplied.encode(), metrics_token.encode()):
-                raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Bearer"})
+                raise HTTPException(
+                    status_code=401,
+                    detail="Unauthorized",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
         return PlainTextResponse(metrics.render(), media_type=METRICS_MEDIA_TYPE)
 
     @api.post("/payments/{provider}/checkout", response_model=CheckoutOut)
@@ -362,7 +397,9 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
         try:
             session = adapter.create_checkout(body.order_reference)
         except ProviderNotLiveError:
-            raise HTTPException(status_code=501, detail="This payment provider is not live.") from None
+            raise HTTPException(
+                status_code=501, detail="This payment provider is not live."
+            ) from None
         return CheckoutOut(
             provider=session.provider,
             order_reference=session.order_reference,
@@ -383,17 +420,27 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
 
         Raises:
             HTTPException: 404 for an unknown provider. 501 when the provider is not live. 400 when the
-               adapter rejects the notification.         
+               adapter rejects the notification.
         """
         adapter = provider_for(provider)
         headers = {name.lower(): value for name, value in request.headers.items()}
         try:
             event = adapter.parse_webhook(headers, await request.body())
         except ProviderNotLiveError:
-            raise HTTPException(status_code=501, detail="This payment provider is not live.") from None
+            raise HTTPException(
+                status_code=501, detail="This payment provider is not live."
+            ) from None
         except WebhookRejectedError:
-            raise HTTPException(status_code=400, detail="Webhook rejected.") from None
-        LOGGER.info("payment notification accepted provider=%s live=%s", event.provider, event.live)
-        return WebhookOut(accepted=True, provider=event.provider, live=event.live)
+            raise HTTPException(
+                status_code=400, detail="Webhook rejected."
+            ) from None
+        LOGGER.info(
+            "payment notification accepted provider=%s live=%s",
+            event.provider,
+            event.live,
+        )
+        return WebhookOut(
+            accepted=True, provider=event.provider, live=event.live
+        )
 
     return api
