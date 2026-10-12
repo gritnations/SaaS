@@ -1,13 +1,11 @@
 """Secondary payment provider: a stub.
 
-Its only purpose is to prove that the API depends on the payment
-interface and not on Paymob. It moves no money, contacts no service and
-holds no secret.
+Its only purpose is to prove that the API depends on the payment interface and not on Paymob. It moves no
+money, contacts no service and holds no secret.
 
 Security constraint:
-    The stub accepts notifications without a signature. It must
-    therefore never be registered in production. ``api/main.py``
-    registers it only outside production.
+    The stub accepts notifications without a signature. It must therefore never be registered in
+    production. ``api/main.py`` registers it only outside production.
 """
 
 import json
@@ -55,9 +53,9 @@ class StubProvider:
     ) -> PaymentEvent:
         """Parse a stub notification.
 
-        The body must be a JSON object with exactly an ``order_reference``
-        and a ``status`` of ``"paid"`` or ``"failed"``. The reference must
-        pass :func:`is_valid_order_reference`. No signature is verified.
+        The body must be a JSON object with exactly an ``order_reference`` and a ``status`` of ``"paid"``
+        or ``"failed"``. The reference must pass :func:`is_valid_order_reference`. No signature is
+        verified.
 
         Args:
             headers: The request headers. Unused, because the stub has no signature.
@@ -67,33 +65,29 @@ class StubProvider:
             The parsed event, with ``live`` set to ``False``.
 
         Raises:
-            WebhookRejectedError: If JSON decoding fails, fields or the
-            reference are invalid, or status is not a string equal to
-            ``"paid"`` or ``"failed"``.
+
+            WebhookRejectedError: If JSON decoding fails, fields or the reference are invalid, or
+            status is not a string equal to ``"paid"`` or ``"failed"``.
         """
         try:
             payload = json.loads(body)
         except (ValueError, UnicodeDecodeError):
             raise WebhookRejectedError("body is not valid JSON") from None
-
         if not isinstance(payload, dict) or set(payload) != {
             "order_reference",
             "status",
         }:
             raise WebhookRejectedError("unexpected fields")
-
         reference, status = payload["order_reference"], payload["status"]
         if not isinstance(reference, str) or not is_valid_order_reference(
             reference
         ):
             raise WebhookRejectedError("invalid order reference")
-
         if not isinstance(status, str) or status not in _STATUSES:
             raise WebhookRejectedError("invalid status")
-
         return PaymentEvent(
             provider=self.name,
             order_reference=reference,
-            status=status,
+            status=str(status),
             live=False,
         )
