@@ -53,12 +53,12 @@ class StubProvider:
             The parsed event, with ``live`` set to ``False``.
 
         Raises:
-            WebhookRejectedError: If JSON decoding fails, fields or the reference are invalid, or a
-                hashable status is neither ``"paid"`` nor ``"failed"``.
-            TypeError: If the reference is valid but the status is a JSON array or object.
+
+            WebhookRejectedError: If JSON decoding fails, fields or the reference are invalid, or
+            status is not a string equal to ``"paid"`` or ``"failed"``.
         """
-        try:
-            payload = json.loads(body)
+         try:
+             payload = json.loads(body)
         except (ValueError, UnicodeDecodeError):
             raise WebhookRejectedError("body is not valid JSON") from None
         if not isinstance(payload, dict) or set(payload) != {"order_reference", "status"}:
@@ -66,6 +66,8 @@ class StubProvider:
         reference, status = payload["order_reference"], payload["status"]
         if not isinstance(reference, str) or not is_valid_order_reference(reference):
             raise WebhookRejectedError("invalid order reference")
-        if status not in _STATUSES:
+        if not isinstance(status, str) or status not in _STATUSES:
+            raise WebhookRejectedError("invalid status")
+        return PaymentEvent(provider=self.name, order_reference=reference, status=str(status), live=False)
             raise WebhookRejectedError("invalid status")
         return PaymentEvent(provider=self.name, order_reference=reference, status=str(status), live=False)
