@@ -69,5 +69,3 @@ class StubProvider:
         if not isinstance(status, str) or status not in _STATUSES:
             raise WebhookRejectedError("invalid status")
         return PaymentEvent(provider=self.name, order_reference=reference, status=str(status), live=False)
-            raise WebhookRejectedError("invalid status")
-        return PaymentEvent(provider=self.name, order_reference=reference, status=str(status), live=False)
