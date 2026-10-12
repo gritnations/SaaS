@@ -57,7 +57,7 @@ class StubProvider:
             WebhookRejectedError: If JSON decoding fails, fields or the reference are invalid, or
             status is not a string equal to ``"paid"`` or ``"failed"``.
         """
-         try:
+        try:
              payload = json.loads(body)
         except (ValueError, UnicodeDecodeError):
             raise WebhookRejectedError("body is not valid JSON") from None
