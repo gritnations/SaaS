@@ -152,7 +152,14 @@ def test_an_invalid_checkout_body_is_refused_without_an_echo(body: dict[str, obj
 
 @pytest.mark.parametrize(
     "content",
-    [b"not json", b'{"order_reference": "order-123"}', b'{"order_reference": "x", "status": "paid"}', b"[]"],
+        [
+        b"not json",
+        b'{"order_reference": "order-123"}',
+        b'{"order_reference": "x", "status": "paid"}',
+        b"[]",
+        b'{"order_reference": "order-123", "status": []}',
+        b'{"order_reference": "order-123", "status": {}}',
+    ],
 )
 def test_a_malformed_stub_notification_is_rejected(content: bytes) -> None:
     """A stub notification that is not the expected JSON object is refused with 400."""
