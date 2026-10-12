@@ -3,20 +3,16 @@
 Routes:
     * ``GET /health``: process liveness. No I/O.
     * ``GET /health/ready``: infrastructure readiness. Coarse status only.
-    * ``GET /metrics``: operational metrics. Open outside production, protected or
-      absent in production.
-    * ``POST /payments/{provider}/checkout`` and
-      ``POST /payments/{provider}/webhook``: the provider-neutral payment
-      boundary. No provider is live.
+    * ``GET /metrics``: operational metrics. Open outside production, protected or absent in production.
+    * ``POST /payments/{provider}/checkout`` and ``POST /payments/{provider}/webhook``: the
+      provider-neutral payment boundary. No provider is live.
 
-This module contains no SQL, no payment-provider implementation and no business
-logic. It delegates to ``postgres`` for the database and to ``payments`` for
-providers.
+This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
+``postgres`` for the database and to ``payments`` for providers.
 
 Environment variables read:
     * ``APP_ENV``: ``production`` (the default), ``development`` or ``test``.
-    * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production.
-      A secret.
+    * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production. A secret.
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
 
 Constraints:
@@ -94,8 +90,8 @@ class StatusOut(BaseModel):
 class CheckoutBody(BaseModel):
     """The body of a checkout request.
 
-    It carries an order reference and nothing else. An amount sent by a caller
-    is refused, because the price is decided on the server.
+    It carries an order reference and nothing else. An amount sent by a caller is refused, because the
+    price is decided on the server.
 
     Attributes:
         order_reference: 6 to 64 letters, digits, hyphens or underscores.
@@ -103,7 +99,9 @@ class CheckoutBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    order_reference: Annotated[str, StringConstraints(pattern=ORDER_REFERENCE_PATTERN)]
+    order_reference: Annotated[
+        str, StringConstraints(pattern=ORDER_REFERENCE_PATTERN)
+    ]
 
 
 class CheckoutOut(BaseModel):
@@ -188,9 +186,8 @@ def build_registry(environment: str) -> PaymentRegistry:
         environment: The value returned by :func:`resolve_environment`.
 
     Returns:
-        A registry holding Paymob everywhere, and the stub only outside production.
-        The stub accepts unsigned notifications, so it is never registered in
-        production.
+        A registry holding Paymob everywhere, and the stub only outside production. The stub accepts
+        unsigned notifications, so it is never registered in production.
     """
     providers: list[PaymentProvider] = [PaymobProvider()]
     if environment != "production":
@@ -201,16 +198,15 @@ def build_registry(environment: str) -> PaymentRegistry:
 def database_from_environment(environ: Mapping[str, str]) -> Database | None:
     """Build the database boundary, or report that it is not configured.
 
-    A missing or unsafe configuration does not stop the API from starting. Liveness
-    stays up and readiness reports ``not_ready``. The API must be rebuilt after
-    correcting the configuration.
+    A missing or unsafe configuration does not stop the API from starting. Liveness stays up and
+    readiness reports ``not_ready``. The API must be rebuilt after correcting the configuration.
 
     Args:
         environ: The mapping to read.
 
     Returns:
-        The database boundary, or ``None`` if its configuration is absent or
-        unsafe. No connection is opened here.
+        The database boundary, or ``None`` if its configuration is absent or unsafe. No connection is
+        opened here.
     """
     try:
         return Database(DatabaseSettings.from_env(environ))
@@ -287,7 +283,9 @@ def create_api(
         """
         problems = [
             {
-                "field": ".".join(str(part) for part in error["loc"][1:])[:64],
+                "field": ".".join(str(part) for part in error["loc"][1:])[
+                    :64
+                ],
                 "problem": str(error["type"]),
             }
             for error in exc.errors()[:10]
@@ -371,13 +369,17 @@ def create_api(
                 if authorization and authorization.startswith("Bearer ")
                 else ""
             )
-            if not hmac.compare_digest(supplied.encode(), metrics_token.encode()):
+            if not hmac.compare_digest(
+                supplied.encode(), metrics_token.encode()
+            ):
                 raise HTTPException(
                     status_code=401,
                     detail="Unauthorized",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
-        return PlainTextResponse(metrics.render(), media_type=METRICS_MEDIA_TYPE)
+        return PlainTextResponse(
+            metrics.render(), media_type=METRICS_MEDIA_TYPE
+        )
 
     @api.post("/payments/{provider}/checkout", response_model=CheckoutOut)
     def checkout(provider: ProviderName, body: CheckoutBody) -> CheckoutOut:
@@ -407,7 +409,9 @@ def create_api(
             live=session.live,
         )
 
-    @api.post("/payments/{provider}/webhook", response_model=WebhookOut, status_code=202)
+    @api.post(
+        "/payments/{provider}/webhook", response_model=WebhookOut, status_code=202
+    )
     async def webhook(provider: ProviderName, request: Request) -> WebhookOut:
         """Receive a provider notification and hand it to the provider adapter.
 
@@ -423,7 +427,9 @@ def create_api(
                adapter rejects the notification.
         """
         adapter = provider_for(provider)
-        headers = {name.lower(): value for name, value in request.headers.items()}
+        headers = {
+            name.lower(): value for name, value in request.headers.items()
+        }
         try:
             event = adapter.parse_webhook(headers, await request.body())
         except ProviderNotLiveError:
