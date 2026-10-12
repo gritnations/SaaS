@@ -1,0 +1,18 @@
+{
+  "name": "saas-repo-tooling",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lint and format tooling for the new platform surfaces. Not a runtime dependency.",
+  "scripts": {
+    "lint:js": "eslint .",
+    "lint:format": "prettier --check .",
+    "lint:md": "markdownlint-cli2",
+    "lint": "npm run lint:js && npm run lint:format && npm run lint:md"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "markdownlint-cli2": "0.23.3",
+    "prettier": "3.9.9"
+  }
+}

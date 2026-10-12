@@ -2,3 +2,12 @@
 .claude/settings.local.json
 # The engine keeps its own .gitignore under schedule-booking/
 _sb_src/
+# Python platform: local environments, caches and secrets
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.env
+# Root lint tooling
+/node_modules/
