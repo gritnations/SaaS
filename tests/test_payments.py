@@ -51,6 +51,8 @@ def test_the_stub_returns_non_live_results() -> None:
         b"\xff\xfe",
         b'"text"',
         b'{"order_reference": "order-123", "status": "refunded"}',
+        b'{"order_reference": "order-123", "status": []}',
+        b'{"order_reference": "order-123", "status": {}}',
         b'{"order_reference": 123456, "status": "paid"}',
         b'{"order_reference": "order-123", "status": "paid", "amount": 5}',
     ],
