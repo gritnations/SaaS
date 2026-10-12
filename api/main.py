@@ -383,9 +383,7 @@ def create_api(environ: Mapping[str, str] | None = None, database: ReadinessProb
 
         Raises:
             HTTPException: 404 for an unknown provider. 501 when the provider is not live. 400 when the
-                adapter rejects the notification.
-            TypeError: Propagated from the stub adapter for an array or object status with a valid
-                order reference; the application error handler converts this to a generic 500.
+               adapter rejects the notification.         
         """
         adapter = provider_for(provider)
         headers = {name.lower(): value for name, value in request.headers.items()}
