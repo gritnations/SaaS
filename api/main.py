@@ -410,7 +410,9 @@ def create_api(
         )
 
     @api.post(
-        "/payments/{provider}/webhook", response_model=WebhookOut, status_code=202
+        "/payments/{provider}/webhook",
+        response_model=WebhookOut,
+        status_code=202,
     )
     async def webhook(provider: ProviderName, request: Request) -> WebhookOut:
         """Receive a provider notification and hand it to the provider adapter.
@@ -448,5 +450,6 @@ def create_api(
         return WebhookOut(
             accepted=True, provider=event.provider, live=event.live
         )
+ 
 
     return api
