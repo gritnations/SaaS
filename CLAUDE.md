@@ -348,8 +348,8 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt   # Windows
 .venv/bin/python -m pip install -r requirements-dev.txt       # Linux/macOS
 python -m pytest -q                                          # tests; no database or credentials needed
-python -m black --check main.py postgres.py api payments tests
-python -m isort --check-only main.py postgres.py api payments tests
+python -m black --check main.py postgres.py api booking payments tests
+python -m isort --check-only main.py postgres.py api booking payments tests
 python -m mypy                                               # strict; file list is in pyproject.toml
 APP_ENV=development uvicorn main:app --no-server-header      # http://127.0.0.1:8000
 npm ci && npm run lint                                       # ESLint, Prettier and Markdown lint on new surfaces

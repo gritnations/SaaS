@@ -6,9 +6,10 @@ Routes:
     * ``GET /metrics``: operational metrics. Open outside production, protected or absent in production.
     * ``POST /payments/{provider}/checkout`` and ``POST /payments/{provider}/webhook``: the
       provider-neutral payment boundary. No provider is live.
+    * ``/businesses/{business}/...``: public booking routes, defined in ``api.booking``.
 
 This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
-``postgres`` for the database and to ``payments`` for providers.
+``postgres`` for the database, to ``payments`` for providers and to ``booking`` for bookings.
 
 Environment variables read:
     * ``APP_ENV``: ``production`` (the default), ``development`` or ``test``.
@@ -31,7 +32,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from api.booking import build_router
 from api.metrics import Metrics
+from booking.service import BookingBackend, BookingService
 from payments.base import (
     ORDER_REFERENCE_PATTERN,
     PaymentProvider,
@@ -212,12 +215,15 @@ def database_from_environment(environ: Mapping[str, str]) -> Database | None:
 def create_api(
     environ: Mapping[str, str] | None = None,
     database: ReadinessProbe | None = None,
+    bookings: BookingBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
     Args:
         environ: The configuration mapping. ``None`` means the process environment.
         database: The database boundary to use. ``None`` means build it from ``environ``.
+        bookings: The booking service to use. ``None`` means build it on the database boundary when
+            that is a real :class:`postgres.Database`; otherwise the booking routes answer 503.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -242,6 +248,9 @@ def create_api(
     )
     api.state.database = probe
     api.state.environment = environment
+    if bookings is None and isinstance(probe, Database):
+        bookings = BookingService(probe)
+    api.include_router(build_router(lambda: bookings))
 
     @api.middleware("http")
     async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:

@@ -29,12 +29,12 @@ target-version = ["py311"]
 [tool.isort]
 profile = "black"
 line_length = 120
-known_first_party = ["api", "main", "payments", "postgres"]
+known_first_party = ["api", "booking", "main", "payments", "postgres"]
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
-files = ["main.py", "postgres.py", "api", "payments", "tests"]
+files = ["main.py", "postgres.py", "api", "booking", "payments", "tests"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
