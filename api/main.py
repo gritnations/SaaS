@@ -7,6 +7,7 @@ Routes:
     * ``POST /payments/{provider}/checkout`` and ``POST /payments/{provider}/webhook``: the
       provider-neutral payment boundary. No provider is live.
     * ``/businesses/{business}/...``: public booking routes, defined in ``api.booking``.
+    * ``/owner/...``: signed-in owner routes, defined in ``api.owner``.
 
 This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
 ``postgres`` for the database, to ``payments`` for providers and to ``booking`` for bookings.
@@ -15,6 +16,7 @@ Environment variables read:
     * ``APP_ENV``: ``production`` (the default), ``development`` or ``test``.
     * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production. A secret.
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
+    * ``SUPABASE_URL``: read by ``api.auth`` to verify owner sign-in tokens.
 
 Constraints:
     * Importing this module and calling :func:`create_api` perform no network I/O.
@@ -32,8 +34,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from api import owner as owner_routes
+from api.auth import TokenVerifier, verifier_from_environment
 from api.booking import build_router
 from api.metrics import Metrics
+from booking.owner import OwnerService
 from booking.service import BookingBackend, BookingService
 from payments.base import (
     ORDER_REFERENCE_PATTERN,
@@ -216,6 +221,8 @@ def create_api(
     environ: Mapping[str, str] | None = None,
     database: ReadinessProbe | None = None,
     bookings: BookingBackend | None = None,
+    owners: owner_routes.OwnerBackend | None = None,
+    verifier: TokenVerifier | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -224,6 +231,9 @@ def create_api(
         database: The database boundary to use. ``None`` means build it from ``environ``.
         bookings: The booking service to use. ``None`` means build it on the database boundary when
             that is a real :class:`postgres.Database`; otherwise the booking routes answer 503.
+        owners: The owner service to use. ``None`` means build it the same way as ``bookings``.
+        verifier: The sign-in token verifier. ``None`` means build it from ``SUPABASE_URL``; without
+            that variable the owner routes answer 503.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -231,6 +241,7 @@ def create_api(
 
     Raises:
         ApiConfigError: If ``APP_ENV`` or ``METRICS_TOKEN`` is invalid.
+        api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
     """
     env = os.environ if environ is None else environ
     environment = resolve_environment(env)
@@ -250,7 +261,12 @@ def create_api(
     api.state.environment = environment
     if bookings is None and isinstance(probe, Database):
         bookings = BookingService(probe)
+    if owners is None and isinstance(probe, Database):
+        owners = OwnerService(probe)
+    if verifier is None:
+        verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
+    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners))
 
     @api.middleware("http")
     async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
