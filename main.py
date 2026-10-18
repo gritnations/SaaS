@@ -180,7 +180,7 @@ def create_app(environ: Mapping[str, str] | None = None, api: FastAPI | None = N
         CORSMiddleware,
         allow_origins=origins,
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "PUT", "PATCH"],
         allow_headers=["Authorization", "Content-Type"],
         max_age=600,
     )
