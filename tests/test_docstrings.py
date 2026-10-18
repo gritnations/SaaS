@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 """The repository root."""
 
 SOURCES = [ROOT / "main.py", ROOT / "postgres.py"] + sorted(
-    path for folder in ("api", "payments", "tests") for path in (ROOT / folder).glob("*.py")
+    path for folder in ("api", "booking", "payments", "tests") for path in (ROOT / folder).glob("*.py")
 )
 """Every Python file that belongs to the platform, including these tests."""
 

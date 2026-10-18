@@ -87,8 +87,8 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
       - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
-      - run: python -m black --check main.py postgres.py api payments tests
-      - run: python -m isort --check-only main.py postgres.py api payments tests
+      - run: python -m black --check main.py postgres.py api booking payments tests
+      - run: python -m isort --check-only main.py postgres.py api booking payments tests
       - run: python -m mypy
       - run: python -m pytest -q
 
