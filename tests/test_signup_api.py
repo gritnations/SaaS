@@ -55,6 +55,10 @@ def test_a_valid_sign_up_creates_the_business() -> None:
         "name": "Fade & Co Barbers",
         "role": "owner",
         "display_name": "Sample Owner",
+        "plan": "free",
+        "plan_status": "active",
+        "trial_ends_at": None,
+        "online_payments": False,
     }
     new = owners.calls[0][1][1]
     assert (new.name, new.business_type, new.business_type_other, new.plan) == (
@@ -68,7 +72,7 @@ def test_a_valid_sign_up_creates_the_business() -> None:
 @pytest.mark.parametrize(
     "change",
     [
-        {"plan": "pro"},
+        {"plan": "enterprise"},
         {"plan": "paid"},
         {"business_type": "casino"},
         {"business_type": "Barbershop"},

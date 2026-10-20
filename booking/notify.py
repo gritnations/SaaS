@@ -58,6 +58,9 @@ class Context:
         cancelled_by: ``customer``, ``owner`` or ``None``.
         sequence: How many times the booking has been moved, for calendar updates.
         manage_url: The private manage link, or ``None`` when it cannot be included.
+        payment_status: ``not_required``, ``awaiting``, ``paid`` or ``at_venue``.
+        price_minor: The booking's price in minor units.
+        currency: The business's ISO 4217 currency.
     """
 
     kind: str
@@ -77,6 +80,9 @@ class Context:
     cancelled_by: str | None
     sequence: int
     manage_url: str | None
+    payment_status: str = "not_required"
+    price_minor: int = 0
+    currency: str = "GBP"
 
 
 def manage_url(site_url: str, slug: str, reference: str, token: str) -> str:
@@ -92,6 +98,21 @@ def manage_url(site_url: str, slug: str, reference: str, token: str) -> str:
         The link.
     """
     return f"{site_url}/#manage={slug}.{reference}.{token}"
+
+
+def payment_row(context: Context) -> tuple[str, str] | None:
+    """Describe what is still to pay, for a booking paid at the venue.
+
+    Args:
+        context: The event.
+
+    Returns:
+        A ``("Payment", text)`` row, or ``None`` when nothing is paid at the venue.
+    """
+    if context.payment_status != "at_venue" or context.price_minor <= 0:
+        return None
+    symbol = {"GBP": "£", "EUR": "€", "USD": "$"}.get(context.currency, context.currency + " ")
+    return ("Payment", f"Pay at the venue: {symbol}{context.price_minor / 100:.2f}")
 
 
 def when_text(context: Context) -> str:
@@ -233,6 +254,9 @@ def customer_message(context: Context, sender_domain: str = "example.com") -> Me
         The message, with a calendar file attached.
     """
     rows = [("Service", context.service_name), ("When", when_text(context)), ("Reference", context.reference)]
+    venue = payment_row(context)
+    if venue and context.kind != "cancelled":
+        rows.append(venue)
     if context.meeting_link and context.kind != "cancelled":
         rows.append(("Meeting link", context.meeting_link))
     link = ("Manage your booking", context.manage_url) if context.manage_url and context.kind != "cancelled" else None
@@ -287,6 +311,9 @@ def owner_message(context: Context) -> Message | None:
         ("Phone", context.customer_phone or "-"),
         ("Note", context.customer_note or "-"),
     ]
+    venue = payment_row(context)
+    if venue and context.kind != "cancelled":
+        rows.append(venue)
     title = f"{verb}: {context.customer_name}"
     intro = f"{verb} for {context.business_name}."
     footer = "Reply to this email to contact the customer."
@@ -322,7 +349,8 @@ def site_url_from_environment(environ: Mapping[str, str]) -> str | None:
 _CONTEXT_QUERY = (
     "SELECT b.business_id::text, z.name, z.slug, z.time_zone, z.contact_email, z.meeting_link, b.reference, s.name, "
     "b.starts_at, b.ends_at, b.customer_name, b.customer_email, b.customer_phone, b.customer_note, b.cancelled_by, "
-    "b.move_count FROM bookings b JOIN businesses z ON z.id = b.business_id JOIN services s ON s.id = b.service_id "
+    "b.move_count, b.payment_status, b.price_minor, z.currency "
+    "FROM bookings b JOIN businesses z ON z.id = b.business_id JOIN services s ON s.id = b.service_id "
     "WHERE b.id = %s"
 )
 
@@ -380,6 +408,9 @@ class Notifier:
             cancelled_by=row[14],
             sequence=int(row[15]),
             manage_url=link,
+            payment_status=row[16],
+            price_minor=int(row[17]),
+            currency=str(row[18]).strip(),
         )
         return str(row[0]), context
 

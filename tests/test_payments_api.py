@@ -18,7 +18,7 @@ from test_stripe import PAID_SESSION, SECRET, event, sign
 
 from api.main import create_api
 from booking.availability import Slot
-from booking.payments import PaymentSettings
+from booking.payments import InvalidOptionsError, PaymentSettings, PlanRequiredError
 from booking.service import Business, Confirmation, DayAvailability, NotFoundError, Service
 from main import create_app
 from payments.base import PaymentEvent, ProviderUnavailableError
@@ -127,7 +127,7 @@ class FakePayments:
             The set-up.
         """
         self._record("settings", account, slug)
-        return PaymentSettings("stripe", True, False)
+        return PaymentSettings("stripe", True, False, True)
 
     def connect(self, account: str, slug: str) -> str:
         """Answer with a sign-up link.
@@ -141,6 +141,23 @@ class FakePayments:
         """
         self._record("connect", account, slug)
         return "https://connect.stripe.com/setup/test"
+
+    def set_options(
+        self, account: str, slug: str, pay_online: bool | None, pay_at_venue: bool | None
+    ) -> PaymentSettings:
+        """Answer with the chosen options.
+
+        Args:
+            account: The account.
+            slug: The business.
+            pay_online: The online choice.
+            pay_at_venue: The venue choice.
+
+        Returns:
+            The set-up.
+        """
+        self._record("set_options", account, slug, pay_online, pay_at_venue)
+        return PaymentSettings("stripe", True, True, True, bool(pay_online), pay_at_venue is not False)
 
     def record(self, event: PaymentEvent) -> bool:
         """Record the event and report that a booking changed.
@@ -206,6 +223,9 @@ def test_the_owner_sees_the_set_up_and_gets_a_sign_up_link() -> None:
         "provider": "stripe",
         "connected": True,
         "enabled": False,
+        "online_allowed": True,
+        "pay_online": False,
+        "pay_at_venue": True,
     }
     response = api.post("/owner/businesses/fade/payments/connect", headers=GOOD)
     assert (response.status_code, response.json()) == (200, {"url": "https://connect.stripe.com/setup/test"})
@@ -220,6 +240,9 @@ def test_without_online_payments_the_set_up_says_so() -> None:
         "provider": None,
         "connected": False,
         "enabled": False,
+        "online_allowed": False,
+        "pay_online": False,
+        "pay_at_venue": True,
     }
     assert api.post("/owner/businesses/fade/payments/connect", headers=GOOD).status_code == 503
 
@@ -229,6 +252,7 @@ def test_without_online_payments_the_set_up_says_so() -> None:
     [
         (NotFoundError("Business not found."), 404),
         (ProviderUnavailableError("Stripe could not create account."), 503),
+        (PlanRequiredError("Online payments come with the Starter and Pro plans."), 403),
         (DatabaseUnavailableError("down"), 503),
     ],
 )
@@ -278,3 +302,30 @@ def test_live_keys_stop_the_api_from_starting() -> None:
     """Only test-mode keys are accepted until live payments are approved."""
     with pytest.raises(StripeConfigError):
         create_api({"APP_ENV": "test", "STRIPE_SECRET_KEY": "sk_live_x", "STRIPE_WEBHOOK_SECRET": SECRET})
+
+
+def test_the_owner_chooses_how_customers_pay() -> None:
+    """Only the fields sent reach the service; unknown fields are refused."""
+    payments = FakePayments()
+    api = client(payments)
+    response = api.patch("/owner/businesses/fade/payments", headers=GOOD, json={"pay_online": True})
+    assert response.status_code == 200
+    assert (response.json()["pay_online"], response.json()["pay_at_venue"]) == (True, True)
+    assert payments.calls[-1] == ("set_options", ("11111111-1111-4111-8111-111111111111", "fade", True, None))
+    assert api.patch("/owner/businesses/fade/payments", headers=GOOD, json={"pay_cash": True}).status_code == 422
+    assert api.patch("/owner/businesses/fade/payments", json={"pay_online": True}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (PlanRequiredError("Online payments come with the Starter and Pro plans."), 403),
+        (InvalidOptionsError("Keep at least one way for customers to pay."), 422),
+    ],
+)
+def test_payment_option_outcomes_map_to_answers(failure: Exception, status: int) -> None:
+    """A plan without online payments is 403; a choice that leaves no way to pay is 422."""
+    response = client(FakePayments(failure)).patch(
+        "/owner/businesses/fade/payments", headers=GOOD, json={"pay_online": True}
+    )
+    assert response.status_code == status

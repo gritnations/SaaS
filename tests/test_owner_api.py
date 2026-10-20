@@ -338,7 +338,18 @@ def test_me_lists_the_accounts_businesses() -> None:
     response = signed_in(owners).get("/owner/me", headers=GOOD)
     assert response.status_code == 200
     assert response.json() == {
-        "businesses": [{"slug": "example", "name": "Example Advisory", "role": "owner", "display_name": None}]
+        "businesses": [
+            {
+                "slug": "example",
+                "name": "Example Advisory",
+                "role": "owner",
+                "display_name": None,
+                "plan": "free",
+                "plan_status": "active",
+                "trial_ends_at": None,
+                "online_payments": False,
+            }
+        ]
     }
     assert owners.calls == [("memberships", (ACCOUNT,))]
 

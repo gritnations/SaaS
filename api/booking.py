@@ -46,12 +46,14 @@ class BusinessOut(BaseModel):
         name: Display name.
         currency: ISO 4217 code that prices are in.
         time_zone: IANA time zone that dates and times are in.
+        payment_options: How paid services can be paid now: ``online``, ``venue``, both, or neither.
     """
 
     slug: str
     name: str
     currency: str
     time_zone: str
+    payment_options: list[str] = []
 
 
 class ServiceOut(BaseModel):
@@ -135,6 +137,7 @@ class BookingBody(BaseModel):
         email: Customer email.
         phone: Customer phone, optional.
         note: Customer's note or question, optional, up to 1000 characters.
+        pay: ``online`` or ``venue`` for a paid service, optional. Omitted means online when offered.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -146,6 +149,7 @@ class BookingBody(BaseModel):
     email: Annotated[str, StringConstraints(max_length=254)]
     phone: Annotated[str, StringConstraints(max_length=32)] | None = None
     note: Annotated[str, StringConstraints(max_length=1000)] | None = None
+    pay: Annotated[str, StringConstraints(pattern="^(online|venue)$")] | None = None
 
     @field_validator("email")
     @classmethod
@@ -211,7 +215,8 @@ class BookingOut(BaseModel):
         ends_at: End, ISO 8601 with offset.
         manage_token: The private code for managing this booking. Returned once, only to the person who booked.
             A paid booking has none here: its manage link is emailed once the payment is confirmed.
-        checkout_url: Where to pay, for a paid service.
+        checkout_url: Where to pay, for a service paid online.
+        payment_status: ``not_required``, ``awaiting`` (paying online) or ``at_venue``.
     """
 
     reference: str
@@ -224,6 +229,7 @@ class BookingOut(BaseModel):
     ends_at: str
     manage_token: str | None = None
     checkout_url: str | None = None
+    payment_status: str = "not_required"
 
 
 def _slot_out(slot: Slot) -> SlotOut:
@@ -297,7 +303,13 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
         except DatabaseUnavailableError:
             raise HTTPException(status_code=503, detail="Booking is unavailable.") from None
         return ServicesOut(
-            business=BusinessOut(slug=found.slug, name=found.name, currency=found.currency, time_zone=found.time_zone),
+            business=BusinessOut(
+                slug=found.slug,
+                name=found.name,
+                currency=found.currency,
+                time_zone=found.time_zone,
+                payment_options=list(found.payment_options),
+            ),
             services=[service_out(s.slug, s.name, s.duration_minutes, s.price_minor) for s in services],
         )
 
@@ -358,6 +370,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             email=body.email,
             phone=body.phone,
             note=body.note,
+            pay=body.pay,
         )
         try:
             confirmed = require().create_booking(business, request)
@@ -381,6 +394,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             ends_at=confirmed.slot.ends_at.isoformat(),
             manage_token=confirmed.manage_token,
             checkout_url=confirmed.checkout_url,
+            payment_status=confirmed.payment_status,
         )
 
     return router

@@ -160,7 +160,9 @@ def test_the_database_itself_refuses_an_overlapping_row(world: World) -> None:
 
 
 def test_paid_services_and_off_grid_times_are_refused(world: World) -> None:
-    """A paid service needs payment, and a time off the session grid is not a session."""
+    """A paid service needs a way to pay, and a time off the session grid is not a session."""
+    with world.database.connection() as connection:
+        connection.execute("UPDATE businesses SET pay_at_venue = false WHERE slug = %s", (world.slug,))
     with pytest.raises(PaymentUnavailableError):
         world.service.create_booking(world.slug, request(world, "paid", "10:30"))
     with pytest.raises(InvalidSlotError):

@@ -22,6 +22,8 @@ Environment variables read:
     * ``RESEND_API_KEY`` and ``EMAIL_FROM``: read by ``mail``. ``PUBLIC_SITE_URL``: read by ``booking.notify``.
     * ``STRIPE_SECRET_KEY`` and ``STRIPE_WEBHOOK_SECRET``: read by ``payments.stripe``. Secrets. Paid
       services can be booked only when both and ``PUBLIC_SITE_URL`` are set.
+    * ``STRIPE_BILLING_WEBHOOK_SECRET``: read by ``payments.stripe``. A secret. Paid plans can be chosen only
+      when it is set as well.
 
 Constraints:
     * Importing this module and calling :func:`create_api` perform no network I/O.
@@ -44,6 +46,7 @@ from api import owner as owner_routes
 from api.auth import TokenVerifier, verifier_from_environment
 from api.booking import build_router
 from api.metrics import Metrics
+from booking.billing import BillingBackend, BillingService
 from booking.manage import ManageService
 from booking.notify import Notifier, site_url_from_environment
 from booking.owner import OwnerService
@@ -237,6 +240,7 @@ def create_api(
     verifier: TokenVerifier | None = None,
     manage: manage_routes.ManageBackend | None = None,
     payments: PaymentsBackend | None = None,
+    billing: BillingBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -251,6 +255,8 @@ def create_api(
         manage: The manage-link service. ``None`` means build it the same way as ``bookings``.
         payments: The payment service. ``None`` means build it from the Stripe settings and
             ``PUBLIC_SITE_URL`` on a real database; without them online payments are not offered.
+        billing: The plan billing service. ``None`` means build it the same way, when the billing webhook
+            secret is also set; without it paid plans are not offered.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -287,6 +293,8 @@ def create_api(
             bookings = BookingService(probe, notifier=notifier, payments=stripe_provider, site_url=site_url)
         if payments is None and stripe_provider is not None and site_url is not None:
             payments = PaymentService(probe, stripe_provider, site_url, notifier=notifier)
+        if billing is None and stripe_provider is not None and stripe_provider.bills_plans and site_url is not None:
+            billing = BillingService(probe, stripe_provider, site_url)
         if owners is None:
             owners = OwnerService(probe, notifier=notifier)
         if manage is None:
@@ -294,7 +302,7 @@ def create_api(
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
-    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners, lambda: payments))
+    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners, lambda: payments, lambda: billing))
     api.include_router(manage_routes.build_router(lambda: manage))
 
     @api.middleware("http")
@@ -467,9 +475,11 @@ def create_api(
         except WebhookRejectedError:
             raise HTTPException(status_code=400, detail="Webhook rejected.") from None
         recorded = False
-        if payments is not None and stripe_provider is not None and event.provider == stripe_provider.name:
+        is_stripe = stripe_provider is not None and event.provider == stripe_provider.name
+        recorder = billing if event.status.startswith("subscription_") else payments
+        if is_stripe and recorder is not None:
             try:
-                recorded = payments.record(event)
+                recorded = recorder.record(event)
             except DatabaseUnavailableError:
                 raise HTTPException(status_code=503, detail="Try again later.") from None
         LOGGER.info(

@@ -143,6 +143,7 @@ def test_services_lists_public_fields_only() -> None:
         "name": "Example Advisory",
         "currency": "GBP",
         "time_zone": "Europe/London",
+        "payment_options": [],
     }
     assert body["services"] == [
         {"slug": "intro", "name": "Introductory call", "duration_minutes": 30, "price_minor": 0, "free": True}

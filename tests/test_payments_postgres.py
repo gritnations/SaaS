@@ -173,8 +173,8 @@ def world() -> Iterator[World]:
     owner = str(uuid.uuid4())
     with database.connection() as connection:
         row = connection.execute(
-            "INSERT INTO businesses (slug, name, notice_minutes, payment_account_id, payments_enabled) "
-            "VALUES (%s, 'Pay test', 0, %s, true) RETURNING id::text",
+            "INSERT INTO businesses (slug, name, notice_minutes, payment_account_id, payments_enabled, pay_online, "
+            "trial_ends_at) VALUES (%s, 'Pay test', 0, %s, true, true, now() + interval '14 days') RETURNING id::text",
             (slug, ACCOUNT + secrets.token_hex(4)),
         ).fetchone()
         assert row is not None
@@ -402,12 +402,17 @@ def test_a_failed_checkout_releases_the_hold_at_once(world: World) -> None:
 
 
 def test_paid_services_need_a_business_that_takes_payments(world: World) -> None:
-    """With payments switched off a paid service cannot be booked; a free one still can."""
+    """With the account not ready a paid service is paid at the venue; with no venue option either it
+    cannot be booked; a free one always can."""
     with world.database.connection() as connection:
         connection.execute("UPDATE businesses SET payments_enabled = false WHERE slug = %s", (world.slug,))
+    reference, link = book(world)
+    assert link is None and row(world, reference)[:2] == ("confirmed", "at_venue")
+    with world.database.connection() as connection:
+        connection.execute("UPDATE businesses SET pay_at_venue = false WHERE slug = %s", (world.slug,))
     with pytest.raises(PaymentUnavailableError):
-        book(world)
-    reference, link = book(world, service="free")
+        book(world, "12:00")
+    reference, link = book(world, "14:00", service="free")
     assert link is None and row(world, reference)[:2] == ("confirmed", "not_required")
 
 
