@@ -8,6 +8,7 @@ Routes:
       provider-neutral payment boundary. No provider is live.
     * ``/businesses/{business}/...``: public booking routes, defined in ``api.booking``.
     * ``/owner/...``: signed-in owner routes, defined in ``api.owner``.
+    * ``/businesses/{business}/bookings/{reference}/...``: manage-link routes, defined in ``api.manage``.
 
 This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
 ``postgres`` for the database, to ``payments`` for providers and to ``booking`` for bookings.
@@ -17,6 +18,7 @@ Environment variables read:
     * ``METRICS_TOKEN``: the bearer token that unlocks ``/metrics`` in production. A secret.
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
     * ``SUPABASE_URL``: read by ``api.auth`` to verify owner sign-in tokens.
+    * ``RESEND_API_KEY`` and ``EMAIL_FROM``: read by ``mail``. ``PUBLIC_SITE_URL``: read by ``booking.notify``.
 
 Constraints:
     * Importing this module and calling :func:`create_api` perform no network I/O.
@@ -34,12 +36,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from api import manage as manage_routes
 from api import owner as owner_routes
 from api.auth import TokenVerifier, verifier_from_environment
 from api.booking import build_router
 from api.metrics import Metrics
+from booking.manage import ManageService
+from booking.notify import Notifier, site_url_from_environment
 from booking.owner import OwnerService
 from booking.service import BookingBackend, BookingService
+from mail import mailer_from_environment, sender_domain
 from payments.base import (
     ORDER_REFERENCE_PATTERN,
     PaymentProvider,
@@ -223,6 +229,7 @@ def create_api(
     bookings: BookingBackend | None = None,
     owners: owner_routes.OwnerBackend | None = None,
     verifier: TokenVerifier | None = None,
+    manage: manage_routes.ManageBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -234,6 +241,7 @@ def create_api(
         owners: The owner service to use. ``None`` means build it the same way as ``bookings``.
         verifier: The sign-in token verifier. ``None`` means build it from ``SUPABASE_URL``; without
             that variable the owner routes answer 503.
+        manage: The manage-link service. ``None`` means build it the same way as ``bookings``.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -242,6 +250,8 @@ def create_api(
     Raises:
         ApiConfigError: If ``APP_ENV`` or ``METRICS_TOKEN`` is invalid.
         api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
+        mail.MailConfigError: If ``RESEND_API_KEY`` is set without a valid ``EMAIL_FROM``.
+        booking.notify.NotifyConfigError: If ``PUBLIC_SITE_URL`` is set but invalid.
     """
     env = os.environ if environ is None else environ
     environment = resolve_environment(env)
@@ -259,14 +269,19 @@ def create_api(
     )
     api.state.database = probe
     api.state.environment = environment
-    if bookings is None and isinstance(probe, Database):
-        bookings = BookingService(probe)
-    if owners is None and isinstance(probe, Database):
-        owners = OwnerService(probe)
+    if isinstance(probe, Database):
+        notifier = Notifier(probe, mailer_from_environment(env), site_url_from_environment(env), sender_domain(env))
+        if bookings is None:
+            bookings = BookingService(probe, notifier=notifier)
+        if owners is None:
+            owners = OwnerService(probe, notifier=notifier)
+        if manage is None:
+            manage = ManageService(probe, notifier=notifier)
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
     api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners))
+    api.include_router(manage_routes.build_router(lambda: manage))
 
     @api.middleware("http")
     async def count_responses(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:

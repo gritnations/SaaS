@@ -14,6 +14,7 @@ Double-booking is prevented twice: the service checks availability, and the ``bo
 exclusion constraint refuses an overlapping row even when two requests race.
 """
 
+import hashlib
 import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -42,6 +43,9 @@ REFERENCE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 """Booking-reference characters. Letters and digits that are easily confused are left out."""
 
 REFERENCE_LENGTH = 10
+
+MANAGE_TOKEN_BYTES = 24
+"""Random bytes in a manage code: 48 hex characters, the only credential a manage link carries."""
 
 
 class BookingError(Exception):
@@ -167,11 +171,27 @@ class Confirmation:
         reference: The public booking reference.
         service: The booked service.
         slot: The booked session.
+        manage_token: The manage code, given once to the person who booked. Only its hash is stored.
     """
 
     reference: str
     service: Service
     slot: Slot
+    manage_token: str | None = None
+
+
+class BookingNotifier(Protocol):
+    """What the booking services need to announce a change. It must never raise."""
+
+    def booking_event(self, kind: str, booking_id: str, manage_token: str | None) -> None:
+        """Send the emails for one booking event and record the attempts.
+
+        Args:
+            kind: ``confirmed``, ``cancelled`` or ``moved``.
+            booking_id: The booking's internal identifier.
+            manage_token: The manage code when the caller holds it, so a link can be included.
+        """
+        ...
 
 
 class BookingBackend(Protocol):
@@ -217,6 +237,18 @@ class BookingBackend(Protocol):
         ...
 
 
+def hash_token(token: str) -> bytes:
+    """Hash a manage code for storage and comparison.
+
+    Args:
+        token: The manage code.
+
+    Returns:
+        Its SHA-256 digest.
+    """
+    return hashlib.sha256(token.encode("ascii", "replace")).digest()
+
+
 def new_reference() -> str:
     """Generate a booking reference from a cryptographically secure source.
 
@@ -229,15 +261,22 @@ def new_reference() -> str:
 class BookingService:
     """Booking operations backed by PostgreSQL."""
 
-    def __init__(self, database: Database, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        clock: Callable[[], datetime] | None = None,
+        notifier: BookingNotifier | None = None,
+    ) -> None:
         """Create the service. Performs no I/O.
 
         Args:
             database: The database boundary.
             clock: Returns the current aware instant. ``None`` means the system clock in UTC.
+            notifier: Sends booking emails after a change is committed. ``None`` sends nothing.
         """
         self._database = database
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
+        self._notifier = notifier
 
     @staticmethod
     def _business(connection: psycopg.Connection[Any], slug: str) -> Business:
@@ -308,7 +347,11 @@ class BookingService:
 
     @staticmethod
     def _booked(
-        connection: psycopg.Connection[Any], business: Business, start: datetime, end: datetime
+        connection: psycopg.Connection[Any],
+        business: Business,
+        start: datetime,
+        end: datetime,
+        exclude_reference: str | None = None,
     ) -> list[tuple[datetime, datetime]]:
         """Load the ranges already taken that touch a period.
 
@@ -317,6 +360,7 @@ class BookingService:
             business: The business.
             start: Start of the period.
             end: End of the period.
+            exclude_reference: A booking to leave out, so that moving a booking does not collide with itself.
 
         Returns:
             ``(starts_at, blocked_until)`` for each confirmed booking overlapping the period, widened by
@@ -325,8 +369,9 @@ class BookingService:
         gap = timedelta(minutes=normalize_break(business.break_minutes))
         rows = connection.execute(
             "SELECT starts_at, blocked_until FROM bookings "
-            "WHERE business_id = %s AND status = 'confirmed' AND starts_at < %s AND blocked_until > %s",
-            (business.id, end + gap, start - gap),
+            "WHERE business_id = %s AND status = 'confirmed' AND starts_at < %s AND blocked_until > %s "
+            "AND reference IS DISTINCT FROM %s",
+            (business.id, end + gap, start - gap, exclude_reference),
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
 
@@ -336,6 +381,7 @@ class BookingService:
         business: Business,
         service: Service,
         dates: Sequence[date],
+        exclude_reference: str | None = None,
     ) -> list[DayAvailability]:
         """Build the sessions for a run of dates inside the booking window.
 
@@ -344,6 +390,7 @@ class BookingService:
             business: The business.
             service: The service.
             dates: Local dates, in order. Dates outside the booking window are skipped.
+            exclude_reference: A booking whose own time does not count as taken.
 
         Returns:
             One entry per open date in the window that has at least one session.
@@ -357,7 +404,7 @@ class BookingService:
         period_start = datetime.combine(wanted[0], datetime.min.time(), zone)
         period_end = datetime.combine(wanted[-1] + timedelta(days=1), datetime.min.time(), zone)
         blocks = self._blocks(connection, business)
-        booked = self._booked(connection, business, period_start, period_end)
+        booked = self._booked(connection, business, period_start, period_end, exclude_reference)
         earliest = now + timedelta(minutes=business.notice_minutes)
         result = []
         for day in wanted:
@@ -459,10 +506,12 @@ class BookingService:
                     raise InvalidSlotError("That time is not available.")
                 blocked_until = slot.ends_at + timedelta(minutes=normalize_break(business.break_minutes))
                 reference = new_reference()
-                connection.execute(
+                token = secrets.token_hex(MANAGE_TOKEN_BYTES)
+                row = connection.execute(
                     "INSERT INTO bookings (business_id, service_id, reference, status, starts_at, ends_at, "
-                    "blocked_until, price_minor, customer_name, customer_email, customer_phone, customer_note) "
-                    "VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "blocked_until, price_minor, customer_name, customer_email, customer_phone, customer_note, "
+                    "manage_token_hash) VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "RETURNING id::text",
                     (
                         business.id,
                         service.id,
@@ -475,8 +524,11 @@ class BookingService:
                         request.email,
                         request.phone,
                         request.note,
+                        hash_token(token),
                     ),
-                )
+                ).fetchone()
         except errors.ExclusionViolation:
             raise SlotTakenError("That time has just been booked.") from None
-        return Confirmation(reference, service, slot)
+        if self._notifier is not None and row is not None:
+            self._notifier.booking_event("confirmed", str(row[0]), token)
+        return Confirmation(reference, service, slot, token)

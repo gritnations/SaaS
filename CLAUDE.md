@@ -348,14 +348,14 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-dev.txt   # Windows
 .venv/bin/python -m pip install -r requirements-dev.txt       # Linux/macOS
 python -m pytest -q                                          # tests; no database or credentials needed
-python -m black --check main.py postgres.py api booking payments tests
-python -m isort --check-only main.py postgres.py api booking payments tests
+python -m black --check main.py mail.py postgres.py api booking payments tests
+python -m isort --check-only main.py mail.py postgres.py api booking payments tests
 python -m mypy                                               # strict; file list is in pyproject.toml
 APP_ENV=development uvicorn main:app --no-server-header      # http://127.0.0.1:8000
 npm ci && npm run lint                                       # ESLint, Prettier and Markdown lint on new surfaces
 ```
 
-Environment variables: `APP_ENV` (`production` by default, `development`, `test`), `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL` (secret), `DATABASE_POOL_MAX_SIZE`, `METRICS_TOKEN` (secret), `SUPABASE_URL` (the identity provider project URL; not a secret; owner routes answer 503 without it). None has a value in this repository.
+Environment variables: `APP_ENV` (`production` by default, `development`, `test`), `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `DATABASE_URL` (secret), `DATABASE_POOL_MAX_SIZE`, `METRICS_TOKEN` (secret), `SUPABASE_URL` (the identity provider project URL; not a secret; owner routes answer 503 without it), `RESEND_API_KEY` (secret; without it emails are logged as skipped), `EMAIL_FROM` (the sender address), `PUBLIC_SITE_URL` (where manage links point; https only, or `http://localhost` in development). None has a value in this repository.
 
 Every module, class and function in the platform has a docstring. `tests/test_docstrings.py` enforces it.
 

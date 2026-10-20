@@ -208,6 +208,7 @@ class BookingOut(BaseModel):
         label: The session as people read it.
         starts_at: Start, ISO 8601 with offset.
         ends_at: End, ISO 8601 with offset.
+        manage_token: The private code for managing this booking. Returned once, only to the person who booked.
     """
 
     reference: str
@@ -218,6 +219,7 @@ class BookingOut(BaseModel):
     label: str
     starts_at: str
     ends_at: str
+    manage_token: str | None = None
 
 
 def _slot_out(slot: Slot) -> SlotOut:
@@ -372,6 +374,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             label=confirmed.slot.label,
             starts_at=confirmed.slot.starts_at.isoformat(),
             ends_at=confirmed.slot.ends_at.isoformat(),
+            manage_token=confirmed.manage_token,
         )
 
     return router
