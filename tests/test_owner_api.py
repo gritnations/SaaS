@@ -21,6 +21,7 @@ from booking.owner import (
     HoursBlock,
     InvalidChangeError,
     Membership,
+    NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
     Settings,
@@ -100,6 +101,19 @@ class FakeOwners:
         self.calls.append((name, args))
         if self.fail_with is not None:
             raise self.fail_with
+
+    def create_business(self, account: str, new: NewBusiness) -> Membership:
+        """Echo the new business as a membership.
+
+        Args:
+            account: The account.
+            new: The sign-up details.
+
+        Returns:
+            The membership.
+        """
+        self._record("create_business", account, new)
+        return Membership("new-company", new.name, "owner", new.owner_name)
 
     def memberships(self, account: str) -> list[Membership]:
         """Return one membership.
@@ -323,7 +337,9 @@ def test_me_lists_the_accounts_businesses() -> None:
     owners = FakeOwners()
     response = signed_in(owners).get("/owner/me", headers=GOOD)
     assert response.status_code == 200
-    assert response.json() == {"businesses": [{"slug": "example", "name": "Example Advisory", "role": "owner"}]}
+    assert response.json() == {
+        "businesses": [{"slug": "example", "name": "Example Advisory", "role": "owner", "display_name": None}]
+    }
     assert owners.calls == [("memberships", (ACCOUNT,))]
 
 
