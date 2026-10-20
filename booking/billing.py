@@ -3,16 +3,15 @@
 Trust path: ``api -> booking.billing -> postgres.Database -> PostgreSQL``, with the provider reached through
 ``payments.base.SubscriptionBilling``.
 
-The price of each plan is decided here, on the server (:data:`booking.owner.PLAN_PRICES`). A business on a
-paid plan stays ``awaiting_payment``, with its booking page closed, until a verified subscription event
-says the plan is paid. Recording is idempotent, and an event changes a business only when its business and
-subscription match what is stored.
+Every business starts on the free plan with a trial, and upgrades from its dashboard. The business stays
+open throughout: the upgrade applies only when a verified subscription event says the plan is paid. The
+price of each plan is decided here, on the server (:data:`booking.owner.PLAN_PRICES`). Recording is
+idempotent, and an event changes a business only when its business and subscription match what is stored.
 
 State transitions of a business's plan:
-    * ``awaiting_payment`` + subscription active -> ``active`` on the plan the subscription was started for.
+    * free (trial or not) + subscription active -> the plan the subscription was started for, ``active``.
     * ``active`` + renewal failed -> ``past_due``; ``past_due`` + paid again -> ``active``.
-    * any paid state + subscription ended -> the free plan, ``active``.
-    * ``awaiting_payment`` + owner chooses free -> the free plan, ``active``.
+    * any paid plan + subscription ended -> the free plan, ``active``. Online payments then stop counting.
 """
 
 import logging
@@ -22,7 +21,7 @@ from typing import Any, Protocol
 
 import psycopg
 
-from booking.owner import PLAN_PRICES, InvalidChangeError, Membership
+from booking.owner import PLAN_PRICES, InvalidChangeError
 from booking.service import NotFoundError
 from payments.base import PaymentEvent, SubscriptionBilling, SubscriptionOrder
 from postgres import Database
@@ -60,45 +59,20 @@ class _PlanRow:
     role: str
     display_name: str | None
 
-    def membership(self, plan: str | None = None, status: str | None = None) -> Membership:
-        """Describe the business as the owner's dashboard sees it.
-
-        Args:
-            plan: The plan to report, when it has just changed.
-            status: The status to report, when it has just changed.
-
-        Returns:
-            The membership.
-        """
-        return Membership(
-            self.slug, self.name, self.role, self.display_name, plan or self.plan, status or self.plan_status
-        )
-
 
 class BillingBackend(Protocol):
     """What the API needs from the billing service. Tests substitute a fake."""
 
-    def start_checkout(self, account: str, slug: str) -> str:
-        """See :meth:`BillingService.start_checkout`.
+    def upgrade(self, account: str, slug: str, plan: str) -> str:
+        """See :meth:`BillingService.upgrade`.
 
         Args:
             account: The verified account identifier.
             slug: The business's public identifier.
+            plan: The paid plan wanted.
 
         Returns:
             The checkout link.
-        """
-        ...
-
-    def choose_free(self, account: str, slug: str) -> Membership:
-        """See :meth:`BillingService.choose_free`.
-
-        Args:
-            account: The verified account identifier.
-            slug: The business's public identifier.
-
-        Returns:
-            The membership on the free plan.
         """
         ...
 
@@ -167,29 +141,35 @@ class BillingService:
             raise NotFoundError("Business not found.")
         return _PlanRow(*row)
 
-    def start_checkout(self, account: str, slug: str) -> str:
-        """Start, or start again, the subscription checkout for a business whose paid plan is not paid yet.
+    def upgrade(self, account: str, slug: str, plan: str) -> str:
+        """Start the subscription checkout that moves a free business (trial or not) to a paid plan.
+
+        The business keeps its current plan until the subscription is confirmed.
 
         Args:
             account: The verified account identifier.
             slug: The business's public identifier.
+            plan: The paid plan wanted.
 
         Returns:
             The provider's checkout link.
 
         Raises:
             NotFoundError: If the account does not manage the business.
-            InvalidChangeError: If the business is not waiting to pay for a paid plan.
+            InvalidChangeError: If the plan is not a paid plan, or the business already has one: plans are
+                changed or cancelled through the provider's portal.
             payments.base.ProviderUnavailableError: If the provider could not be reached.
         """
+        if plan not in PLAN_PRICES:
+            raise InvalidChangeError("That plan is not available.")
         with self._database.connection() as connection:
             business = self._member(connection, account, slug)
-        if business.plan_status != "awaiting_payment" or business.plan not in PLAN_PRICES:
-            raise InvalidChangeError("This business is not waiting to pay for a plan.")
-        plan_name, amount = PLAN_PRICES[business.plan]
+        if business.plan != "free" or business.subscription_id is not None:
+            raise InvalidChangeError("Change or cancel your plan from Manage subscription.")
+        plan_name, amount = PLAN_PRICES[plan]
         order = SubscriptionOrder(
             business_id=business.id,
-            plan=business.plan,
+            plan=plan,
             plan_name=plan_name,
             amount_minor=amount,
             currency=business.currency,
@@ -199,34 +179,8 @@ class BillingService:
             cancel_url=f"{self._site_url}/#billing=cancelled",
         )
         checkout = self._provider.start_subscription(order)
-        LOGGER.info("plan checkout started business=%s plan=%s", slug, business.plan)
+        LOGGER.info("plan checkout started business=%s plan=%s", slug, plan)
         return checkout.checkout_url
-
-    def choose_free(self, account: str, slug: str) -> Membership:
-        """Move a business that has not paid for its paid plan to the free plan.
-
-        Args:
-            account: The verified account identifier.
-            slug: The business's public identifier.
-
-        Returns:
-            The membership on the free plan.
-
-        Raises:
-            NotFoundError: If the account does not manage the business.
-            InvalidChangeError: If the business has a paid plan that is paid: it is cancelled through the
-                provider's portal instead.
-        """
-        with self._database.connection() as connection:
-            business = self._member(connection, account, slug)
-            if business.plan == "free":
-                return business.membership()
-            if business.plan_status != "awaiting_payment":
-                raise InvalidChangeError("Cancel your paid plan from Manage subscription.")
-            connection.execute(
-                "UPDATE businesses SET plan = 'free', plan_status = 'active' WHERE id = %s", (business.id,)
-            )
-        return business.membership("free", "active")
 
     def portal(self, account: str, slug: str) -> str:
         """Get the provider's page where the business manages its subscription.
@@ -284,7 +238,7 @@ class BillingService:
                 if event.plan not in PLAN_PRICES:
                     LOGGER.error("subscription event names no paid plan business=%s", slug)
                     return False
-                if not same and status != "awaiting_payment":
+                if not same and subscription is not None:
                     LOGGER.error("second subscription for a business already on a plan business=%s", slug)
                     return False
                 if same and status == "active" and plan == event.plan:

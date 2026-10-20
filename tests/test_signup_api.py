@@ -57,7 +57,8 @@ def test_a_valid_sign_up_creates_the_business() -> None:
         "display_name": "Sample Owner",
         "plan": "free",
         "plan_status": "active",
-        "checkout_url": None,
+        "trial_ends_at": None,
+        "online_payments": False,
     }
     new = owners.calls[0][1][1]
     assert (new.name, new.business_type, new.business_type_other, new.plan) == (

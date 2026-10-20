@@ -29,7 +29,7 @@ from booking.billing import BillingBackend
 from booking.owner import (
     BUSINESS_TYPES,
     MAX_DAYS_PER_REQUEST,
-    PLANS,
+    SIGNUP_PLANS,
     ConflictError,
     HoursBlock,
     InvalidChangeError,
@@ -39,7 +39,7 @@ from booking.owner import (
     OwnerServiceRecord,
     Settings,
 )
-from booking.payments import PaymentsBackend
+from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
 from booking.service import Business, NotFoundError
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
@@ -224,8 +224,9 @@ class MembershipOut(BaseModel):
         role: The account's role.
         display_name: The owner's name as given at sign-up, or ``None``.
         plan: ``free``, ``starter`` or ``pro``.
-        plan_status: ``active``, ``awaiting_payment`` or ``past_due``.
-        checkout_url: Where to pay, when a paid plan was just chosen.
+        plan_status: ``active``, or ``past_due`` when a renewal failed.
+        trial_ends_at: When the trial ends, ISO 8601, or ``None``.
+        online_payments: The plan, or the trial, includes online payments now.
     """
 
     slug: str
@@ -234,7 +235,8 @@ class MembershipOut(BaseModel):
     display_name: str | None = None
     plan: str = "free"
     plan_status: str = "active"
-    checkout_url: str | None = None
+    trial_ends_at: str | None = None
+    online_payments: bool = False
 
 
 class NewBusinessBody(BaseModel):
@@ -245,7 +247,7 @@ class NewBusinessBody(BaseModel):
         business_type: The kind of business.
         business_type_other: A short description, required when the type is ``other``.
         owner_name: The owner's name. Private.
-        plan: The chosen plan: ``free``, or a paid plan that is paid for straight after.
+        plan: ``free``: every business starts free with a trial and upgrades later.
         contact_email: Where booking emails go. Optional.
     """
 
@@ -255,7 +257,7 @@ class NewBusinessBody(BaseModel):
     business_type: Annotated[str, StringConstraints(pattern="^(" + "|".join(BUSINESS_TYPES) + ")$")]
     business_type_other: Annotated[str, StringConstraints(max_length=60)] | None = None
     owner_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
-    plan: Annotated[str, StringConstraints(pattern="^(" + "|".join(PLANS) + ")$")]
+    plan: Annotated[str, StringConstraints(pattern="^(" + "|".join(SIGNUP_PLANS) + ")$")] = "free"
     contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
 
     @field_validator("business_type_other", "contact_email")
@@ -690,19 +692,71 @@ def _parse_time(value: str) -> time:
 
 
 class PaymentsOut(BaseModel):
-    """A business's online payment set-up.
+    """A business's payment set-up.
 
     Attributes:
         available: Online payments are offered on this platform at all.
         provider: The payment provider's name, or ``None`` when not available.
         connected: The business has an account with the provider.
-        enabled: The account can take payments, so paid services can be booked online.
+        enabled: The account can take payments.
+        online_allowed: The plan, or the trial, includes online payments.
+        pay_online: The business offers online payment.
+        pay_at_venue: The business offers payment at the venue.
     """
 
     available: bool
     provider: str | None
     connected: bool
     enabled: bool
+    online_allowed: bool = False
+    pay_online: bool = False
+    pay_at_venue: bool = True
+
+
+class PaymentOptionsBody(BaseModel):
+    """How the business's customers may pay for paid services. Omitted fields are left as they are.
+
+    Attributes:
+        pay_online: Offer online payment.
+        pay_at_venue: Offer payment at the venue.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    pay_online: bool | None = None
+    pay_at_venue: bool | None = None
+
+
+class UpgradeBody(BaseModel):
+    """The paid plan an owner upgrades to. The price is decided on the server.
+
+    Attributes:
+        plan: ``starter`` or ``pro``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    plan: Annotated[str, StringConstraints(pattern="^(starter|pro)$")]
+
+
+def _payments_out(current: PaymentSettings) -> PaymentsOut:
+    """Convert a payment set-up for the response.
+
+    Args:
+        current: The set-up.
+
+    Returns:
+        Its public form for the owner.
+    """
+    return PaymentsOut(
+        available=True,
+        provider=current.provider,
+        connected=current.connected,
+        enabled=current.enabled,
+        online_allowed=current.online_allowed,
+        pay_online=current.pay_online,
+        pay_at_venue=current.pay_at_venue,
+    )
 
 
 class ConnectOut(BaseModel):
@@ -715,12 +769,11 @@ class ConnectOut(BaseModel):
     url: str
 
 
-def _membership_out(found: Membership, checkout_url: str | None = None) -> MembershipOut:
+def _membership_out(found: Membership) -> MembershipOut:
     """Convert a membership for the response.
 
     Args:
         found: The membership.
-        checkout_url: The plan checkout link, if one was just started.
 
     Returns:
         Its public form for the owner.
@@ -732,7 +785,8 @@ def _membership_out(found: Membership, checkout_url: str | None = None) -> Membe
         display_name=found.display_name,
         plan=found.plan,
         plan_status=found.plan_status,
-        checkout_url=checkout_url,
+        trial_ends_at=found.trial_ends_at.isoformat() if found.trial_ends_at else None,
+        online_payments=found.online_payments,
     )
 
 
@@ -841,25 +895,12 @@ def build_router(
             body: The sign-up details.
 
         Returns:
-            The new membership, with the business's slug. On a paid plan it also carries the checkout link;
-            if that link cannot be made now, the business stays waiting to pay and the owner can retry.
-
-        Raises:
-            HTTPException: 503 for a paid plan when paid plans cannot be billed here.
+            The new membership, on the free plan with its trial.
         """
-        if body.plan != "free" and billing() is None:
-            raise HTTPException(status_code=503, detail="Paid plans are not available yet.")
         new = NewBusiness(
             body.name, body.business_type, body.business_type_other, body.owner_name, body.plan, body.contact_email
         )
-        made = answer(lambda: service().create_business(who, new))
-        found = billing()
-        if made.plan == "free" or found is None:
-            return _membership_out(made)
-        try:
-            return _membership_out(made, answer(lambda: found.start_checkout(who, made.slug)))
-        except ProviderUnavailableError:
-            return _membership_out(made)
+        return _membership_out(answer(lambda: service().create_business(who, new)))
 
     @router.get("/businesses/{business}/bookings", response_model=BookingsOut)
     def bookings(
@@ -1020,9 +1061,45 @@ def build_router(
         found, item = answer(lambda: service().cancel_booking(who, business, reference))
         return _booking_out(found, item)
 
+    def payment_answer(call: Callable[[], T]) -> T:
+        """Run a payment or plan operation and turn its outcomes into HTTP answers.
+
+        Args:
+            call: The operation.
+
+        Returns:
+            Its result.
+
+        Raises:
+            HTTPException: 403 when the plan does not include it, 422 for options that are not allowed, 503
+                when the provider cannot be reached, and the owner answers for everything else.
+        """
+        try:
+            return answer(call)
+        except PlanRequiredError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from None
+        except InvalidOptionsError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except ProviderUnavailableError:
+            raise HTTPException(status_code=503, detail="Payments are unavailable right now.") from None
+
+    def require_payments() -> PaymentsBackend:
+        """Get the payment service, or answer 503 when there is none.
+
+        Returns:
+            The payment service.
+
+        Raises:
+            HTTPException: 503 when online payments are not configured here.
+        """
+        found = payments()
+        if found is None:
+            raise HTTPException(status_code=503, detail="Online payments are not available yet.")
+        return found
+
     @router.get("/businesses/{business}/payments", response_model=PaymentsOut)
     def get_payments(who: Account, business: Slug) -> PaymentsOut:
-        """Read the business's online payment set-up, refreshed from the provider.
+        """Read the business's payment set-up, refreshed from the provider.
 
         Args:
             who: The verified account.
@@ -1035,14 +1112,28 @@ def build_router(
         if found is None:
             service()
             return PaymentsOut(available=False, provider=None, connected=False, enabled=False)
-        current = answer(lambda: found.settings(who, business))
-        return PaymentsOut(
-            available=True, provider=current.provider, connected=current.connected, enabled=current.enabled
+        return _payments_out(payment_answer(lambda: found.settings(who, business)))
+
+    @router.patch("/businesses/{business}/payments", response_model=PaymentsOut)
+    def patch_payments(who: Account, business: Slug, body: PaymentOptionsBody) -> PaymentsOut:
+        """Choose how the business's customers pay: online, at the venue, or both.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            body: The choices to change.
+
+        Returns:
+            The set-up after the change.
+        """
+        found = require_payments()
+        return _payments_out(
+            payment_answer(lambda: found.set_options(who, business, body.pay_online, body.pay_at_venue))
         )
 
     @router.post("/businesses/{business}/payments/connect", response_model=ConnectOut)
     def connect_payments(who: Account, business: Slug) -> ConnectOut:
-        """Start or continue the business's sign-up with the payment provider.
+        """Start or continue the business's sign-up with the payment provider. Needs Starter, Pro or the trial.
 
         Args:
             who: The verified account.
@@ -1050,17 +1141,9 @@ def build_router(
 
         Returns:
             The provider's link. The page sends the owner there.
-
-        Raises:
-            HTTPException: 503 when online payments are not configured or the provider cannot be reached.
         """
-        found = payments()
-        if found is None:
-            raise HTTPException(status_code=503, detail="Online payments are not available yet.")
-        try:
-            return ConnectOut(url=answer(lambda: found.connect(who, business)))
-        except ProviderUnavailableError:
-            raise HTTPException(status_code=503, detail="Online payments are unavailable right now.") from None
+        found = require_payments()
+        return ConnectOut(url=payment_answer(lambda: found.connect(who, business)))
 
     def require_billing() -> BillingBackend:
         """Get the billing service, or answer 503 when there is none.
@@ -1076,43 +1159,24 @@ def build_router(
             raise HTTPException(status_code=503, detail="Paid plans are not available yet.")
         return found
 
-    @router.post("/businesses/{business}/billing/checkout", response_model=ConnectOut)
-    def plan_checkout(who: Account, business: Slug) -> ConnectOut:
-        """Start the payment for a paid plan that is not paid yet.
+    @router.post("/businesses/{business}/billing/upgrade", response_model=ConnectOut)
+    def plan_upgrade(who: Account, business: Slug, body: UpgradeBody) -> ConnectOut:
+        """Start the payment that upgrades a free business, on its trial or not, to a paid plan.
 
         Args:
             who: The verified account.
             business: Business slug.
+            body: The plan wanted.
 
         Returns:
             The provider's checkout link.
-
-        Raises:
-            HTTPException: 422 when nothing is waiting to be paid, 503 when the provider cannot be reached.
         """
         found = require_billing()
-        try:
-            return ConnectOut(url=answer(lambda: found.start_checkout(who, business)))
-        except ProviderUnavailableError:
-            raise HTTPException(status_code=503, detail="Payment is unavailable right now.") from None
-
-    @router.post("/businesses/{business}/billing/free", response_model=MembershipOut)
-    def plan_free(who: Account, business: Slug) -> MembershipOut:
-        """Switch a business that has not paid for its paid plan to the free plan.
-
-        Args:
-            who: The verified account.
-            business: Business slug.
-
-        Returns:
-            The membership on the free plan.
-        """
-        found = require_billing()
-        return _membership_out(answer(lambda: found.choose_free(who, business)))
+        return ConnectOut(url=payment_answer(lambda: found.upgrade(who, business, body.plan)))
 
     @router.post("/businesses/{business}/billing/portal", response_model=ConnectOut)
     def plan_portal(who: Account, business: Slug) -> ConnectOut:
-        """Open the provider's page where the business manages its subscription.
+        """Open the provider's page where the business changes or cancels its plan and updates its card.
 
         Args:
             who: The verified account.
@@ -1120,14 +1184,8 @@ def build_router(
 
         Returns:
             The provider's link.
-
-        Raises:
-            HTTPException: 422 when the business has never subscribed, 503 when the provider cannot be reached.
         """
         found = require_billing()
-        try:
-            return ConnectOut(url=answer(lambda: found.portal(who, business)))
-        except ProviderUnavailableError:
-            raise HTTPException(status_code=503, detail="Subscription management is unavailable right now.") from None
+        return ConnectOut(url=payment_answer(lambda: found.portal(who, business)))
 
     return router

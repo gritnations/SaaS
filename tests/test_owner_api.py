@@ -346,7 +346,8 @@ def test_me_lists_the_accounts_businesses() -> None:
                 "display_name": None,
                 "plan": "free",
                 "plan_status": "active",
-                "checkout_url": None,
+                "trial_ends_at": None,
+                "online_payments": False,
             }
         ]
     }

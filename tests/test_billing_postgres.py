@@ -1,12 +1,14 @@
-"""Tests for plan billing against a real PostgreSQL database.
+"""Tests for plans, trials and payment options against a real PostgreSQL database.
 
-Skipped unless ``BOOKING_TEST_DATABASE_URL`` is set. The database must have every migration applied. A
-fake provider stands in for Stripe. Each test creates its own businesses and deletes everything it created.
+Skipped unless ``BOOKING_TEST_DATABASE_URL`` is set. The database must have every migration applied. Fake
+providers stand in for Stripe. Each test creates its own businesses and deletes everything it created.
 
-What these tests establish: a business on a paid plan waits for payment with its booking page closed;
-the checkout is built from server values; only a matching verified subscription event activates it, once;
-renewal failures, recovery and cancellation move the plan as agreed; events for another subscription or an
-unknown business change nothing; and only an unpaid paid plan can be switched to free from the dashboard.
+What these tests establish: a new business starts free with a 14-day trial that includes online payments,
+its booking page open; an upgrade checkout is built from server values and only a matching verified
+subscription event changes the plan, once; renewal failures, recovery and cancellation move the plan as
+agreed; events for another subscription or an unknown business change nothing; online payments need a paid
+plan or the trial; and each business chooses how its customers pay, with paying at the venue confirmed at
+once and the plan's end switching online payment off.
 """
 
 import os
@@ -14,12 +16,20 @@ import secrets
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from test_payments_postgres import FakeProvider
 
 from booking.billing import BillingService
 from booking.owner import InvalidChangeError, NewBusiness, OwnerService
-from booking.service import BookingService, NotFoundError
+from booking.payments import InvalidOptionsError, PaymentService, PlanRequiredError
+from booking.service import (
+    TRIAL_DAYS,
+    BookingRequest,
+    BookingService,
+    PaymentUnavailableError,
+)
 from payments.base import HostedCheckout, PaymentEvent, SubscriptionOrder
 from postgres import Database, DatabaseSettings
 
@@ -74,16 +84,20 @@ class World:
 
     Attributes:
         database: The database boundary.
-        provider: The fake provider.
+        provider: The fake billing provider.
+        accounts: The fake payment-account provider.
         owners: The owner service.
         billing: The billing service.
+        payments: The payment service.
         bookings: The booking service.
     """
 
     database: Database
     provider: FakeBillingProvider
+    accounts: FakeProvider
     owners: OwnerService
     billing: BillingService
+    payments: PaymentService
     bookings: BookingService
 
 
@@ -95,14 +109,16 @@ def world() -> Iterator[World]:
         The services. Created slugs start with ``plantest-``.
     """
     database = Database(DatabaseSettings.from_env({"DATABASE_URL": os.environ[URL_ENV]}))
-    provider = FakeBillingProvider()
+    provider, accounts = FakeBillingProvider(), FakeProvider()
     try:
         yield World(
             database,
             provider,
+            accounts,
             OwnerService(database),
             BillingService(database, provider, SITE),
-            BookingService(database),
+            PaymentService(database, accounts, SITE),
+            BookingService(database, payments=accounts, site_url=SITE),
         )
     finally:
         with database.connection() as connection:
@@ -116,12 +132,11 @@ def world() -> Iterator[World]:
         database.close()
 
 
-def sign_up(world: World, plan: str) -> tuple[str, str, str]:
-    """Create a business on a plan for a new account.
+def sign_up(world: World) -> tuple[str, str, str]:
+    """Create a business for a new account, with a paid service open every day.
 
     Args:
         world: The services.
-        plan: The plan.
 
     Returns:
         ``(account, slug, business_id)``.
@@ -129,11 +144,22 @@ def sign_up(world: World, plan: str) -> tuple[str, str, str]:
     account = str(uuid.uuid4())
     made = world.owners.create_business(
         account,
-        NewBusiness(f"Plantest {secrets.token_hex(3)}", "salon", None, "Sample Owner", plan, "owner@example.com"),
+        NewBusiness(f"Plantest {secrets.token_hex(3)}", "salon", None, "Sample Owner", "free", "owner@example.com"),
     )
     with world.database.connection() as connection:
         row = connection.execute("SELECT id::text FROM businesses WHERE slug = %s", (made.slug,)).fetchone()
-    assert row is not None
+        assert row is not None
+        connection.execute(
+            "INSERT INTO services (business_id, slug, name, duration_minutes, price_minor) "
+            "VALUES (%s, 'cut', 'Haircut', 60, 2500)",
+            (row[0],),
+        )
+        connection.execute("UPDATE businesses SET notice_minutes = 0 WHERE id = %s", (row[0],))
+        for weekday in (0, 6):
+            connection.execute(
+                "INSERT INTO weekly_hours (business_id, weekday, start_time, end_time) VALUES (%s, %s, '09:00', '17:00')",
+                (row[0], weekday),
+            )
     return account, made.slug, row[0]
 
 
@@ -154,6 +180,18 @@ def plan_of(world: World, slug: str) -> tuple[str, str, str | None, str | None]:
         ).fetchone()
     assert row is not None
     return row[0], row[1], row[2], row[3]
+
+
+def set_business(world: World, slug: str, assignments: str) -> None:
+    """Change fields of a test business directly.
+
+    Args:
+        world: The services.
+        slug: The business.
+        assignments: SQL ``SET`` assignments, written by the test itself.
+    """
+    with world.database.connection() as connection:
+        connection.execute(f"UPDATE businesses SET {assignments} WHERE slug = %s", (slug,))
 
 
 def event(business_id: str, status: str, subscription: str = "sub_test_1", plan: str = "starter") -> PaymentEvent:
@@ -179,52 +217,70 @@ def event(business_id: str, status: str, subscription: str = "sub_test_1", plan:
     )
 
 
-def test_a_paid_plan_waits_for_payment_with_its_booking_page_closed(world: World) -> None:
-    """The membership says so, the public services are not found, and the checkout uses server values."""
-    account, slug, business_id = sign_up(world, "starter")
-    assert [(m.plan, m.plan_status) for m in world.owners.memberships(account)] == [("starter", "awaiting_payment")]
-    with pytest.raises(NotFoundError):
-        world.bookings.list_services(slug)
-    assert world.billing.start_checkout(account, slug) == f"https://checkout.example.com/{business_id}"
-    order = world.provider.orders[0]
-    assert (order.business_id, order.plan, order.amount_minor, order.currency, order.customer_email) == (
-        business_id,
-        "starter",
-        900,
-        "GBP",
-        "owner@example.com",
+def book(world: World, slug: str, start: str, pay: str | None = None) -> tuple[str, str]:
+    """Book the paid service on the next Sunday or Saturday.
+
+    Args:
+        world: The services.
+        slug: The business.
+        start: Local start time.
+        pay: The customer's choice.
+
+    Returns:
+        ``(status, payment_status)`` of the new booking.
+    """
+    day = datetime.now(UTC).date() + timedelta(days=2)
+    while day.weekday() not in (5, 6):
+        day += timedelta(days=1)
+    made = world.bookings.create_booking(
+        slug, BookingRequest("cut", day, start, "Test Customer", "customer@example.com", None, None, pay)
     )
-    assert order.success_url == f"{SITE}/#billing=done"
+    return made.status, made.payment_status
 
 
-def test_a_free_business_is_open_and_has_nothing_to_pay(world: World) -> None:
-    """Free is active at once, its page is open, and no checkout or portal is offered."""
-    account, slug, _ = sign_up(world, "free")
+def test_a_new_business_starts_free_with_a_trial_and_is_open(world: World) -> None:
+    """Free and active, a 14-day trial that includes online payments, and its booking page open."""
+    account, slug, _ = sign_up(world)
+    [membership] = world.owners.memberships(account)
+    assert (membership.plan, membership.plan_status, membership.online_payments) == ("free", "active", True)
+    assert membership.trial_ends_at is not None
+    left = membership.trial_ends_at - datetime.now(UTC)
+    assert timedelta(days=TRIAL_DAYS - 1) < left <= timedelta(days=TRIAL_DAYS)
+    world.bookings.list_services(slug)
+
+
+def test_an_upgrade_is_built_from_server_values_and_keeps_the_business_open(world: World) -> None:
+    """The checkout carries the server price; the plan changes only when the subscription is confirmed."""
+    account, slug, business_id = sign_up(world)
+    assert world.billing.upgrade(account, slug, "pro") == f"https://checkout.example.com/{business_id}"
+    order = world.provider.orders[0]
+    assert (order.business_id, order.plan, order.amount_minor, order.currency) == (business_id, "pro", 2900, "GBP")
     assert plan_of(world, slug)[:2] == ("free", "active")
     world.bookings.list_services(slug)
     with pytest.raises(InvalidChangeError):
-        world.billing.start_checkout(account, slug)
+        world.billing.upgrade(account, slug, "enterprise")
     with pytest.raises(InvalidChangeError):
         world.billing.portal(account, slug)
 
 
 def test_a_matching_subscription_activates_the_plan_once(world: World) -> None:
-    """The plan becomes active with its subscription and customer; a repeat changes nothing."""
-    account, slug, business_id = sign_up(world, "pro")
+    """The plan becomes active with its subscription and customer; a repeat changes nothing; a second
+    upgrade is sent to the portal."""
+    account, slug, business_id = sign_up(world)
     assert world.billing.record(event(business_id, "subscription_active", plan="pro")) is True
     assert plan_of(world, slug) == ("pro", "active", "cus_test_1", "sub_test_1")
-    world.bookings.list_services(slug)
     assert world.billing.record(event(business_id, "subscription_active", plan="pro")) is False
     assert world.billing.portal(account, slug) == "https://billing.example.com/cus_test_1"
+    with pytest.raises(InvalidChangeError):
+        world.billing.upgrade(account, slug, "starter")
 
 
 def test_renewal_failure_recovery_and_cancellation(world: World) -> None:
     """past_due on a failed renewal, active again when paid, back to free (customer kept) when it ends."""
-    _, slug, business_id = sign_up(world, "starter")
+    _, slug, business_id = sign_up(world)
     world.billing.record(event(business_id, "subscription_active"))
     assert world.billing.record(event(business_id, "subscription_past_due")) is True
     assert plan_of(world, slug)[:2] == ("starter", "past_due")
-    world.bookings.list_services(slug)
     assert world.billing.record(event(business_id, "subscription_active")) is True
     assert plan_of(world, slug)[:2] == ("starter", "active")
     assert world.billing.record(event(business_id, "subscription_ended")) is True
@@ -233,27 +289,62 @@ def test_renewal_failure_recovery_and_cancellation(world: World) -> None:
 
 def test_events_that_do_not_match_change_nothing(world: World) -> None:
     """Another subscription, an unknown or malformed business, or an unknown plan is ignored."""
-    _, slug, business_id = sign_up(world, "starter")
+    _, slug, business_id = sign_up(world)
     world.billing.record(event(business_id, "subscription_active"))
     assert world.billing.record(event(business_id, "subscription_past_due", subscription="sub_other")) is False
     assert world.billing.record(event(business_id, "subscription_ended", subscription="sub_other")) is False
     assert world.billing.record(event(business_id, "subscription_active", subscription="sub_other")) is False
     assert world.billing.record(event(str(uuid.uuid4()), "subscription_active")) is False
     assert world.billing.record(event("not-a-business", "subscription_active")) is False
-    _, other_slug, other_id = sign_up(world, "starter")
+    _, other_slug, other_id = sign_up(world)
     assert world.billing.record(event(other_id, "subscription_active", plan="enterprise")) is False
     assert plan_of(world, slug)[:2] == ("starter", "active")
-    assert plan_of(world, other_slug)[:2] == ("starter", "awaiting_payment")
+    assert plan_of(world, other_slug)[:2] == ("free", "active")
 
 
-def test_only_an_unpaid_plan_can_switch_to_free_from_the_dashboard(world: World) -> None:
-    """Awaiting payment can choose free; a paid plan must be cancelled through the portal; others get 404."""
-    account, slug, business_id = sign_up(world, "pro")
-    with pytest.raises(NotFoundError):
-        world.billing.choose_free(str(uuid.uuid4()), slug)
-    assert world.billing.choose_free(account, slug).plan == "free"
-    assert plan_of(world, slug)[:2] == ("free", "active")
-    paid_account, paid_slug, paid_id = sign_up(world, "pro")
-    world.billing.record(event(paid_id, "subscription_active", plan="pro"))
-    with pytest.raises(InvalidChangeError):
-        world.billing.choose_free(paid_account, paid_slug)
+def test_a_new_business_takes_paid_bookings_at_the_venue(world: World) -> None:
+    """By default a paid service is confirmed at once and marked pay at the venue; online is not offered."""
+    _, slug, _ = sign_up(world)
+    business, _ = world.bookings.list_services(slug)
+    assert business.payment_options == ("venue",)
+    assert book(world, slug, "09:00") == ("confirmed", "at_venue")
+    with pytest.raises(PaymentUnavailableError):
+        book(world, slug, "11:00", pay="online")
+
+
+def test_online_payments_need_the_trial_or_a_paid_plan(world: World) -> None:
+    """During the trial the owner can connect Stripe and switch online on; after it, both are refused,
+    and an online choice already made stops counting until a paid plan restores it."""
+    account, slug, business_id = sign_up(world)
+    world.payments.connect(account, slug)
+    assert world.payments.settings(account, slug).enabled is True
+    options = world.payments.set_options(account, slug, True, None)
+    assert (options.pay_online, options.pay_at_venue, options.online_allowed) == (True, True, True)
+    assert world.bookings.list_services(slug)[0].payment_options == ("online", "venue")
+    assert book(world, slug, "09:00") == ("pending_payment", "awaiting")
+    assert book(world, slug, "11:00", pay="venue") == ("confirmed", "at_venue")
+    set_business(world, slug, "trial_ends_at = now() - interval '1 minute'")
+    assert world.bookings.list_services(slug)[0].payment_options == ("venue",)
+    assert book(world, slug, "13:00") == ("confirmed", "at_venue")
+    with pytest.raises(PlanRequiredError):
+        world.payments.set_options(account, slug, True, None)
+    with pytest.raises(PlanRequiredError):
+        world.payments.connect(account, slug)
+    world.billing.record(event(business_id, "subscription_active"))
+    assert world.bookings.list_services(slug)[0].payment_options == ("online", "venue")
+
+
+def test_payment_options_must_leave_a_way_to_pay_and_need_a_ready_account(world: World) -> None:
+    """Online cannot be switched on before Stripe is ready; switching everything off is refused; online
+    only removes the venue option."""
+    account, slug, _ = sign_up(world)
+    with pytest.raises(InvalidOptionsError):
+        world.payments.set_options(account, slug, True, None)
+    with pytest.raises(InvalidOptionsError):
+        world.payments.set_options(account, slug, None, False)
+    world.payments.connect(account, slug)
+    world.payments.settings(account, slug)
+    world.payments.set_options(account, slug, True, False)
+    assert world.bookings.list_services(slug)[0].payment_options == ("online",)
+    with pytest.raises(PaymentUnavailableError):
+        book(world, slug, "09:00", pay="venue")

@@ -12,13 +12,20 @@ Customer details leave the database only through this module, and only to a memb
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import psycopg
 from psycopg import errors
 
-from booking.service import BookingError, BookingNotifier, Business, NotFoundError
+from booking.service import (
+    TRIAL_DAYS,
+    BookingError,
+    BookingNotifier,
+    Business,
+    NotFoundError,
+    online_payments_allowed,
+)
 from postgres import Database
 
 MAX_DAYS_PER_REQUEST = 62
@@ -45,7 +52,10 @@ BUSINESS_TYPES = (
 """The kinds of business an owner can choose at sign-up. Matches the database check."""
 
 PLANS = ("free", "starter", "pro")
-"""Plans that can be chosen. Matches the database check."""
+"""Every plan. Matches the database check."""
+
+SIGNUP_PLANS = ("free",)
+"""Plans a business can start on. Every business starts free with a trial and upgrades later."""
 
 PLAN_PRICES = {"starter": ("Starter", 900), "pro": ("Pro", 2900)}
 """``plan -> (display name, monthly price in pence)`` for the paid plans. Test placeholders until the real
@@ -89,8 +99,9 @@ class Membership:
         role: The account's role, currently always ``owner``.
         display_name: The owner's name as given at sign-up, or ``None``. Private to the dashboard.
         plan: ``free``, ``starter`` or ``pro``.
-        plan_status: ``active``, ``awaiting_payment`` (a paid plan not yet paid) or ``past_due`` (a renewal
-            failed).
+        plan_status: ``active``, or ``past_due`` when a renewal failed.
+        trial_ends_at: When the business's trial ends, or ``None``.
+        online_payments: The plan, or the trial, includes online payments now.
     """
 
     slug: str
@@ -99,6 +110,8 @@ class Membership:
     display_name: str | None = None
     plan: str = "free"
     plan_status: str = "active"
+    trial_ends_at: datetime | None = None
+    online_payments: bool = False
 
 
 @dataclass(frozen=True)
@@ -110,7 +123,7 @@ class NewBusiness:
         business_type: One of :data:`BUSINESS_TYPES`.
         business_type_other: A short description when the type is ``other``, else ``None``.
         owner_name: The owner's name. Private.
-        plan: One of :data:`PLANS`.
+        plan: One of :data:`SIGNUP_PLANS`.
         contact_email: Where booking emails go, or ``None``.
     """
 
@@ -279,19 +292,22 @@ class OwnerService:
         """
         with self._database.connection() as connection:
             rows = connection.execute(
-                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status "
+                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status, b.trial_ends_at "
                 "FROM business_members m JOIN businesses b ON b.id = m.business_id "
                 "WHERE m.user_id = %s ORDER BY b.name",
                 (account,),
             ).fetchall()
-        return [Membership(*row) for row in rows]
+        now = datetime.now(UTC)
+        return [
+            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now)) for r in rows
+        ]
 
     def create_business(self, account: str, new: NewBusiness) -> Membership:
         """Create the account's business with sensible defaults, in one transaction.
 
         The business gets a unique slug from its name, Monday to Friday 09:00 to 17:00, one free 30-minute
-        service, GBP and UK time (the table defaults), and the account as its owner. On a paid plan it
-        starts as ``awaiting_payment``, and its booking page stays closed until the plan is paid.
+        service, GBP and UK time (the table defaults), payment at the venue, the account as its owner, the
+        free plan and a :data:`booking.service.TRIAL_DAYS`-day trial of the paid features.
 
         Args:
             account: The verified account identifier.
@@ -304,7 +320,7 @@ class OwnerService:
             ConflictError: If the account already has a business.
             InvalidChangeError: If the type or plan is not offered, or ``other`` has no description.
         """
-        if new.business_type not in BUSINESS_TYPES or new.plan not in PLANS:
+        if new.business_type not in BUSINESS_TYPES or new.plan not in SIGNUP_PLANS:
             raise InvalidChangeError("That business type or plan is not available.")
         if (new.business_type == "other") != bool(new.business_type_other):
             raise InvalidChangeError("Describe the business when its type is other.")
@@ -326,19 +342,20 @@ class OwnerService:
                     slug = base[: 40 - len(suffix)].rstrip("-") + suffix
                     counter += 1
                 row: Any = connection.execute(
-                    "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, plan_status, "
-                    "contact_email) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id::text",
+                    "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, contact_email, "
+                    "trial_ends_at) VALUES (%s, %s, %s, %s, %s, %s, now() + make_interval(days => %s)) "
+                    "RETURNING id::text, trial_ends_at",
                     (
                         slug,
                         new.name,
                         new.business_type,
                         new.business_type_other,
                         new.plan,
-                        "active" if new.plan == "free" else "awaiting_payment",
                         new.contact_email,
+                        TRIAL_DAYS,
                     ),
                 ).fetchone()
-                business_id = str(row[0])
+                business_id, trial_ends_at = str(row[0]), row[1]
                 connection.execute(
                     "INSERT INTO business_members (business_id, user_id, role, display_name) "
                     "VALUES (%s, %s, 'owner', %s)",
@@ -357,9 +374,7 @@ class OwnerService:
                     )
         except errors.UniqueViolation:
             raise ConflictError("This account already has a business.") from None
-        return Membership(
-            slug, new.name, "owner", new.owner_name, new.plan, "active" if new.plan == "free" else "awaiting_payment"
-        )
+        return Membership(slug, new.name, "owner", new.owner_name, new.plan, "active", trial_ends_at, True)
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """List bookings that start within a run of local days, with customer details.

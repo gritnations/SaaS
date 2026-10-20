@@ -7,9 +7,11 @@ price, which sessions are free and whether a requested time is a real, bookable 
 supplies only identifiers, a date, a time and the customer's details.
 
 Paid services:
-    * A paid service can be booked only when the business takes online payments. Otherwise the booking
-      raises :class:`PaymentUnavailableError`.
-    * A paid booking starts as a hold (``pending_payment``) that blocks its time for
+    * Each business chooses how its customers pay: online through its own payment account, at the venue,
+      or both (:func:`payment_options`). Online needs a paid plan or the trial, a ready payment account and
+      the business's choice. A paid service with no way to pay raises :class:`PaymentUnavailableError`.
+    * A booking paid at the venue is confirmed at once and marked ``at_venue``.
+    * A booking paid online starts as a hold (``pending_payment``) that blocks its time for
       :data:`HOLD_MINUTES`, and the customer is sent to a provider-hosted checkout on the business's own
       account. Only a verified payment notification confirms it (see ``booking.payments``).
     * An unpaid hold is released lazily: :func:`release_expired_holds` marks it ``expired`` before any
@@ -23,7 +25,7 @@ import hashlib
 import logging
 import secrets
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -55,6 +57,12 @@ REFERENCE_LENGTH = 10
 
 MANAGE_TOKEN_BYTES = 24
 """Random bytes in a manage code: 48 hex characters, the only credential a manage link carries."""
+
+PAID_PLANS = ("starter", "pro")
+"""Plans billed monthly. Each includes online card payments."""
+
+TRIAL_DAYS = 14
+"""Length of the trial every new business starts with: the paid features, without a card."""
 
 CHECKOUT_MINUTES = 31
 """How long a checkout accepts payment. The provider's minimum is 30 minutes."""
@@ -98,7 +106,12 @@ class Business:
         notice_minutes: How long before a session it may still be booked.
         window_days: How many days ahead, counting today, are open for booking.
         payment_account_id: The business's payment account, or ``None``.
-        payments_enabled: Whether the business takes online payments.
+        payments_enabled: Whether the business's payment account can take payments.
+        plan: The business's plan.
+        trial_ends_at: When the business's trial ends, or ``None``.
+        pay_online: The business offers online payment.
+        pay_at_venue: The business offers payment at the venue.
+        payment_options: How paid services can be paid now, filled in by :meth:`BookingService.list_services`.
     """
 
     id: str
@@ -111,6 +124,11 @@ class Business:
     window_days: int
     payment_account_id: str | None = None
     payments_enabled: bool = False
+    plan: str = "free"
+    trial_ends_at: datetime | None = None
+    pay_online: bool = False
+    pay_at_venue: bool = True
+    payment_options: tuple[str, ...] = ()
 
     @property
     def zone(self) -> ZoneInfo:
@@ -172,6 +190,8 @@ class BookingRequest:
         email: Customer email.
         phone: Customer phone, if given.
         note: Customer's note or question, if given.
+        pay: ``online`` or ``venue`` for a paid service, or ``None`` to let the business's options decide,
+            preferring online.
     """
 
     service: str
@@ -181,6 +201,7 @@ class BookingRequest:
     email: str
     phone: str | None
     note: str | None
+    pay: str | None = None
 
 
 @dataclass(frozen=True)
@@ -194,7 +215,8 @@ class Confirmation:
         manage_token: The manage code, given once to the person who booked. Only its hash is stored. A
             paid booking gets its code by email once the payment is confirmed.
         status: ``confirmed``, or ``pending_payment`` while a paid booking waits for its payment.
-        checkout_url: Where to pay, for a paid booking.
+        checkout_url: Where to pay, for a booking paid online.
+        payment_status: ``not_required``, ``awaiting`` (paying online) or ``at_venue``.
     """
 
     reference: str
@@ -203,6 +225,7 @@ class Confirmation:
     manage_token: str | None = None
     status: str = "confirmed"
     checkout_url: str | None = None
+    payment_status: str = "not_required"
 
 
 class BookingNotifier(Protocol):
@@ -274,6 +297,20 @@ def hash_token(token: str) -> bytes:
     return hashlib.sha256(token.encode("ascii", "replace")).digest()
 
 
+def online_payments_allowed(plan: str, trial_ends_at: datetime | None, now: datetime) -> bool:
+    """Decide whether a business's plan includes online card payments.
+
+    Args:
+        plan: The business's plan.
+        trial_ends_at: When its trial ends, or ``None``.
+        now: The current instant.
+
+    Returns:
+        ``True`` on a paid plan (also while a renewal is overdue) or during the trial.
+    """
+    return plan in PAID_PLANS or (trial_ends_at is not None and trial_ends_at > now)
+
+
 def release_expired_holds(connection: psycopg.Connection[Any], business_id: str) -> None:
     """Mark a business's unpaid holds whose time has run out as ``expired``, releasing their time.
 
@@ -335,11 +372,12 @@ class BookingService:
             The business.
 
         Raises:
-            NotFoundError: If no business has that slug, or its paid plan is not paid yet.
+            NotFoundError: If no business has that slug.
         """
         row = connection.execute(
             "SELECT id::text, slug, name, time_zone, currency, break_minutes, notice_minutes, window_days, "
-            "payment_account_id, payments_enabled FROM businesses WHERE slug = %s AND plan_status <> 'awaiting_payment'",
+            "payment_account_id, payments_enabled, plan, trial_ends_at, pay_online, pay_at_venue "
+            "FROM businesses WHERE slug = %s",
             (slug,),
         ).fetchone()
         if row is None:
@@ -487,7 +525,7 @@ class BookingService:
                 "WHERE business_id = %s AND active ORDER BY sort_order, name",
                 (business.id,),
             ).fetchall()
-        return business, [Service(*row) for row in rows]
+        return replace(business, payment_options=tuple(self.payment_options(business))), [Service(*row) for row in rows]
 
     def availability(
         self, business_slug: str, service_slug: str, start: date, days: int
@@ -543,9 +581,8 @@ class BookingService:
             with self._database.connection() as connection:
                 business = self._business(connection, business_slug)
                 service = self._service(connection, business, request.service)
-                paid = service.price_minor > 0
-                if paid and not self._can_take_payment(business):
-                    raise PaymentUnavailableError("Online payment is not available for this business yet.")
+                method = self._payment_method(business, service, request.pay)
+                paid = method == "online"
                 release_expired_holds(connection, business.id)
                 days = self._days(connection, business, service, [request.date])
                 slot = next(
@@ -578,7 +615,7 @@ class BookingService:
                         request.phone,
                         request.note,
                         None if token is None else hash_token(token),
-                        "awaiting" if paid else "not_required",
+                        {"online": "awaiting", "venue": "at_venue"}.get(method, "not_required"),
                         paid,
                         HOLD_MINUTES,
                     ),
@@ -591,25 +628,61 @@ class BookingService:
         if not paid:
             if self._notifier is not None:
                 self._notifier.booking_event("confirmed", booking_id, token)
-            return Confirmation(reference, service, slot, token)
+            status = "at_venue" if method == "venue" else "not_required"
+            return Confirmation(reference, service, slot, token, payment_status=status)
         checkout_url = self._start_checkout(business, service, reference, request.email, booking_id, hold_expires_at)
-        return Confirmation(reference, service, slot, None, "pending_payment", checkout_url)
+        return Confirmation(reference, service, slot, None, "pending_payment", checkout_url, "awaiting")
 
-    def _can_take_payment(self, business: Business) -> bool:
-        """Report whether a paid booking can be taken for the business now.
+    def payment_options(self, business: Business) -> list[str]:
+        """List how the business's customers can pay for a paid service now.
 
         Args:
             business: The business.
 
         Returns:
-            ``True`` when a provider and a return site are configured and the business takes payments.
+            ``online`` when it offers online payment, its plan includes it and its payment account is
+            ready; ``venue`` when it offers payment at the venue. Empty when a paid service cannot be booked.
         """
-        return (
-            self._payments is not None
+        options = []
+        online = (
+            business.pay_online
+            and online_payments_allowed(business.plan, business.trial_ends_at, self._clock())
+            and self._payments is not None
             and self._site_url is not None
             and business.payments_enabled
             and business.payment_account_id is not None
         )
+        if online:
+            options.append("online")
+        if business.pay_at_venue:
+            options.append("venue")
+        return options
+
+    def _payment_method(self, business: Business, service: Service, wanted: str | None) -> str:
+        """Choose how a booking is paid.
+
+        Args:
+            business: The business.
+            service: The booked service.
+            wanted: The customer's choice, or ``None``.
+
+        Returns:
+            ``free`` for a free service, else ``online`` or ``venue``.
+
+        Raises:
+            PaymentUnavailableError: If the service has a price and the wanted way, or every way, is not
+                available.
+        """
+        if service.price_minor == 0:
+            return "free"
+        options = self.payment_options(business)
+        if wanted is not None:
+            if wanted not in options:
+                raise PaymentUnavailableError("That way of paying is not available for this business.")
+            return wanted
+        if not options:
+            raise PaymentUnavailableError("This service cannot be booked online yet.")
+        return options[0]
 
     def _start_checkout(
         self,
