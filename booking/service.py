@@ -6,15 +6,21 @@ The service decides everything that matters for a booking on the server: which s
 price, which sessions are free and whether a requested time is a real, bookable session. The caller
 supplies only identifiers, a date, a time and the customer's details.
 
-Slice 1 limits:
-    * Only free services can be booked. A paid service raises :class:`PaymentUnavailableError`.
-    * There is no cancellation, rescheduling or hold.
+Paid services:
+    * A paid service can be booked only when the business takes online payments. Otherwise the booking
+      raises :class:`PaymentUnavailableError`.
+    * A paid booking starts as a hold (``pending_payment``) that blocks its time for
+      :data:`HOLD_MINUTES`, and the customer is sent to a provider-hosted checkout on the business's own
+      account. Only a verified payment notification confirms it (see ``booking.payments``).
+    * An unpaid hold is released lazily: :func:`release_expired_holds` marks it ``expired`` before any
+      new booking or move of the same business, so no scheduler is needed.
 
 Double-booking is prevented twice: the service checks availability, and the ``bookings_no_overlap``
 exclusion constraint refuses an overlapping row even when two requests race.
 """
 
 import hashlib
+import logging
 import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -34,7 +40,10 @@ from booking.availability import (
     time_to_minutes,
     weekday_index,
 )
+from payments.base import AccountPayments, CheckoutOrder, ProviderUnavailableError
 from postgres import Database
+
+LOGGER = logging.getLogger(__name__)
 
 MAX_DAYS_PER_REQUEST = 14
 """The most days one availability request may cover."""
@@ -47,6 +56,13 @@ REFERENCE_LENGTH = 10
 MANAGE_TOKEN_BYTES = 24
 """Random bytes in a manage code: 48 hex characters, the only credential a manage link carries."""
 
+CHECKOUT_MINUTES = 31
+"""How long a checkout accepts payment. The provider's minimum is 30 minutes."""
+
+HOLD_MINUTES = CHECKOUT_MINUTES + 5
+"""How long a paid booking holds its time: the checkout's life plus a margin, so that a payment made in
+the checkout's last minute still finds its time held."""
+
 
 class BookingError(Exception):
     """Base class for booking outcomes the API reports to the caller. Messages are fixed and public."""
@@ -57,7 +73,7 @@ class NotFoundError(BookingError):
 
 
 class PaymentUnavailableError(BookingError):
-    """The service has a price and payments are not available yet."""
+    """The service has a price and the business cannot take an online payment now."""
 
 
 class InvalidSlotError(BookingError):
@@ -81,6 +97,8 @@ class Business:
         break_minutes: Break between sessions.
         notice_minutes: How long before a session it may still be booked.
         window_days: How many days ahead, counting today, are open for booking.
+        payment_account_id: The business's payment account, or ``None``.
+        payments_enabled: Whether the business takes online payments.
     """
 
     id: str
@@ -91,6 +109,8 @@ class Business:
     break_minutes: int
     notice_minutes: int
     window_days: int
+    payment_account_id: str | None = None
+    payments_enabled: bool = False
 
     @property
     def zone(self) -> ZoneInfo:
@@ -165,19 +185,24 @@ class BookingRequest:
 
 @dataclass(frozen=True)
 class Confirmation:
-    """A confirmed booking, as returned to the customer.
+    """A new booking, as returned to the customer.
 
     Attributes:
         reference: The public booking reference.
         service: The booked service.
         slot: The booked session.
-        manage_token: The manage code, given once to the person who booked. Only its hash is stored.
+        manage_token: The manage code, given once to the person who booked. Only its hash is stored. A
+            paid booking gets its code by email once the payment is confirmed.
+        status: ``confirmed``, or ``pending_payment`` while a paid booking waits for its payment.
+        checkout_url: Where to pay, for a paid booking.
     """
 
     reference: str
     service: Service
     slot: Slot
     manage_token: str | None = None
+    status: str = "confirmed"
+    checkout_url: str | None = None
 
 
 class BookingNotifier(Protocol):
@@ -249,6 +274,20 @@ def hash_token(token: str) -> bytes:
     return hashlib.sha256(token.encode("ascii", "replace")).digest()
 
 
+def release_expired_holds(connection: psycopg.Connection[Any], business_id: str) -> None:
+    """Mark a business's unpaid holds whose time has run out as ``expired``, releasing their time.
+
+    Args:
+        connection: An open connection, inside the transaction that is about to take a time.
+        business_id: The business.
+    """
+    connection.execute(
+        "UPDATE bookings SET status = 'expired' "
+        "WHERE business_id = %s AND status = 'pending_payment' AND hold_expires_at <= now()",
+        (business_id,),
+    )
+
+
 def new_reference() -> str:
     """Generate a booking reference from a cryptographically secure source.
 
@@ -266,6 +305,8 @@ class BookingService:
         database: Database,
         clock: Callable[[], datetime] | None = None,
         notifier: BookingNotifier | None = None,
+        payments: AccountPayments | None = None,
+        site_url: str | None = None,
     ) -> None:
         """Create the service. Performs no I/O.
 
@@ -273,10 +314,14 @@ class BookingService:
             database: The database boundary.
             clock: Returns the current aware instant. ``None`` means the system clock in UTC.
             notifier: Sends booking emails after a change is committed. ``None`` sends nothing.
+            payments: The payment provider for paid services. ``None`` means paid services cannot be booked.
+            site_url: The public site that checkouts return to. ``None`` means paid services cannot be booked.
         """
         self._database = database
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
         self._notifier = notifier
+        self._payments = payments
+        self._site_url = site_url
 
     @staticmethod
     def _business(connection: psycopg.Connection[Any], slug: str) -> Business:
@@ -293,8 +338,8 @@ class BookingService:
             NotFoundError: If no business has that slug.
         """
         row = connection.execute(
-            "SELECT id::text, slug, name, time_zone, currency, break_minutes, notice_minutes, window_days "
-            "FROM businesses WHERE slug = %s",
+            "SELECT id::text, slug, name, time_zone, currency, break_minutes, notice_minutes, window_days, "
+            "payment_account_id, payments_enabled FROM businesses WHERE slug = %s",
             (slug,),
         ).fetchone()
         if row is None:
@@ -363,14 +408,15 @@ class BookingService:
             exclude_reference: A booking to leave out, so that moving a booking does not collide with itself.
 
         Returns:
-            ``(starts_at, blocked_until)`` for each confirmed booking overlapping the period, widened by
-            the current break so that a new session cannot start inside the break before a booking.
+            ``(starts_at, blocked_until)`` for each confirmed booking and each unexpired hold overlapping
+            the period, widened by the current break so that a new session cannot start inside the break
+            before a booking.
         """
         gap = timedelta(minutes=normalize_break(business.break_minutes))
         rows = connection.execute(
-            "SELECT starts_at, blocked_until FROM bookings "
-            "WHERE business_id = %s AND status = 'confirmed' AND starts_at < %s AND blocked_until > %s "
-            "AND reference IS DISTINCT FROM %s",
+            "SELECT starts_at, blocked_until FROM bookings WHERE business_id = %s "
+            "AND (status = 'confirmed' OR (status = 'pending_payment' AND hold_expires_at > now())) "
+            "AND starts_at < %s AND blocked_until > %s AND reference IS DISTINCT FROM %s",
             (business.id, end + gap, start - gap, exclude_reference),
         ).fetchall()
         return [(row[0], row[1]) for row in rows]
@@ -469,22 +515,24 @@ class BookingService:
             return business, service, self._days(connection, business, service, dates)
 
     def create_booking(self, business_slug: str, request: BookingRequest) -> Confirmation:
-        """Book a session of a free service.
+        """Book a session. A free service is confirmed at once; a paid one is held until it is paid.
 
         The requested time must be an available session as :meth:`availability` would list it at this
         moment. The insert runs in the same transaction as the check, and the database's exclusion
-        constraint settles any race.
+        constraint settles any race. For a paid service the checkout is created after the hold is
+        committed; if that fails, the hold is released at once.
 
         Args:
             business_slug: The business's public identifier.
             request: What the customer asked for.
 
         Returns:
-            The confirmed booking.
+            The booking: confirmed, or waiting for payment with the checkout link.
 
         Raises:
             NotFoundError: If the business or service does not exist.
-            PaymentUnavailableError: If the service has a price.
+            PaymentUnavailableError: If the service has a price and the business cannot take an online
+                payment now.
             InvalidSlotError: If the date and time are not an available session.
             SlotTakenError: If another booking took the session first.
             postgres.DatabaseUnavailableError: If the database cannot be reached.
@@ -495,8 +543,10 @@ class BookingService:
             with self._database.connection() as connection:
                 business = self._business(connection, business_slug)
                 service = self._service(connection, business, request.service)
-                if service.price_minor > 0:
-                    raise PaymentUnavailableError("Online payment is not available yet.")
+                paid = service.price_minor > 0
+                if paid and not self._can_take_payment(business):
+                    raise PaymentUnavailableError("Online payment is not available for this business yet.")
+                release_expired_holds(connection, business.id)
                 days = self._days(connection, business, service, [request.date])
                 slot = next(
                     (s for day in days for s in day.slots if s.time == request.time and s.available),
@@ -506,16 +556,19 @@ class BookingService:
                     raise InvalidSlotError("That time is not available.")
                 blocked_until = slot.ends_at + timedelta(minutes=normalize_break(business.break_minutes))
                 reference = new_reference()
-                token = secrets.token_hex(MANAGE_TOKEN_BYTES)
+                token = None if paid else secrets.token_hex(MANAGE_TOKEN_BYTES)
                 row = connection.execute(
                     "INSERT INTO bookings (business_id, service_id, reference, status, starts_at, ends_at, "
                     "blocked_until, price_minor, customer_name, customer_email, customer_phone, customer_note, "
-                    "manage_token_hash) VALUES (%s, %s, %s, 'confirmed', %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                    "RETURNING id::text",
+                    "manage_token_hash, payment_status, hold_expires_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                    "CASE WHEN %s THEN now() + make_interval(mins => %s) END) "
+                    "RETURNING id::text, hold_expires_at",
                     (
                         business.id,
                         service.id,
                         reference,
+                        "pending_payment" if paid else "confirmed",
                         slot.starts_at,
                         slot.ends_at,
                         blocked_until,
@@ -524,11 +577,89 @@ class BookingService:
                         request.email,
                         request.phone,
                         request.note,
-                        hash_token(token),
+                        None if token is None else hash_token(token),
+                        "awaiting" if paid else "not_required",
+                        paid,
+                        HOLD_MINUTES,
                     ),
                 ).fetchone()
         except errors.ExclusionViolation:
             raise SlotTakenError("That time has just been booked.") from None
-        if self._notifier is not None and row is not None:
-            self._notifier.booking_event("confirmed", str(row[0]), token)
-        return Confirmation(reference, service, slot, token)
+        if row is None:
+            raise SlotTakenError("That time has just been booked.")
+        booking_id, hold_expires_at = str(row[0]), row[1]
+        if not paid:
+            if self._notifier is not None:
+                self._notifier.booking_event("confirmed", booking_id, token)
+            return Confirmation(reference, service, slot, token)
+        checkout_url = self._start_checkout(business, service, reference, request.email, booking_id, hold_expires_at)
+        return Confirmation(reference, service, slot, None, "pending_payment", checkout_url)
+
+    def _can_take_payment(self, business: Business) -> bool:
+        """Report whether a paid booking can be taken for the business now.
+
+        Args:
+            business: The business.
+
+        Returns:
+            ``True`` when a provider and a return site are configured and the business takes payments.
+        """
+        return (
+            self._payments is not None
+            and self._site_url is not None
+            and business.payments_enabled
+            and business.payment_account_id is not None
+        )
+
+    def _start_checkout(
+        self,
+        business: Business,
+        service: Service,
+        reference: str,
+        email: str,
+        booking_id: str,
+        hold_expires_at: datetime,
+    ) -> str:
+        """Create the checkout for a committed hold and store its identifier; release the hold on failure.
+
+        Args:
+            business: The business. Its payment account is known to be set.
+            service: The booked service.
+            reference: The booking reference.
+            email: The customer's email, prefilled at checkout.
+            booking_id: The hold's internal identifier.
+            hold_expires_at: When the hold runs out.
+
+        Returns:
+            The checkout link.
+
+        Raises:
+            PaymentUnavailableError: If the checkout could not be created. The hold is released.
+        """
+        if self._payments is None or self._site_url is None or business.payment_account_id is None:
+            raise PaymentUnavailableError("Online payment is not available for this business yet.")
+        back = f"{self._site_url}/?b={business.slug}"
+        order = CheckoutOrder(
+            reference=reference,
+            amount_minor=service.price_minor,
+            currency=business.currency,
+            description=f"{service.name}, {business.name}",
+            account_id=business.payment_account_id,
+            customer_email=email,
+            success_url=f"{back}#paid={reference}",
+            cancel_url=f"{back}#unpaid={reference}",
+            expires_at=hold_expires_at - timedelta(minutes=HOLD_MINUTES - CHECKOUT_MINUTES),
+        )
+        try:
+            checkout = self._payments.start_checkout(order)
+        except ProviderUnavailableError:
+            with self._database.connection() as connection:
+                connection.execute(
+                    "UPDATE bookings SET status = 'expired' WHERE id = %s AND status = 'pending_payment'",
+                    (booking_id,),
+                )
+            raise PaymentUnavailableError("Online payment is unavailable right now. Please try again.") from None
+        with self._database.connection() as connection:
+            connection.execute("UPDATE bookings SET checkout_id = %s WHERE id = %s", (checkout.checkout_id, booking_id))
+        LOGGER.info("checkout started reference=%s", reference)
+        return checkout.checkout_url

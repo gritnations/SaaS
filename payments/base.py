@@ -7,11 +7,16 @@ Constraints:
     * An amount is never taken from the caller. A checkout is started from an order reference only, so
       that the price is always decided on the server.
     * A provider that is not live must refuse to act. It must not pretend to succeed.
+
+Providers that let each business take payments into its own account also implement
+:class:`AccountPayments`. The booking layer, not the caller, builds every :class:`CheckoutOrder`, so the
+amount always comes from the server.
 """
 
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 ORDER_REFERENCE_PATTERN = r"^[A-Za-z0-9_-]{6,64}$"
@@ -34,6 +39,10 @@ class ProviderNotLiveError(PaymentError):
 
 class WebhookRejectedError(PaymentError):
     """Raised when a webhook payload is malformed or cannot be trusted."""
+
+
+class ProviderUnavailableError(PaymentError):
+    """Raised when the provider could not be reached or refused a request. The message holds no secret."""
 
 
 def is_valid_order_reference(value: str) -> bool:
@@ -72,14 +81,138 @@ class PaymentEvent:
     Attributes:
         provider: The name of the provider that sent the notification.
         order_reference: The order the notification is about.
-        status: The reported outcome, ``"paid"`` or ``"failed"``.
+        status: The reported outcome: ``"paid"``, ``"failed"``, ``"expired"``, or ``"ignored"`` for a
+            verified notification that needs no action.
         live: ``True`` only when the event describes real money.
+        checkout_id: The provider's checkout identifier, when the notification is about a checkout.
+        account_id: The business's payment account the notification came from, if any.
+        amount_minor: The amount paid, in minor units, as the provider reports it.
+        currency: The currency paid, as an upper-case ISO 4217 code.
+        payment_id: The provider's payment identifier, when known.
     """
 
     provider: str
     order_reference: str
     status: str
     live: bool
+    checkout_id: str | None = None
+    account_id: str | None = None
+    amount_minor: int | None = None
+    currency: str | None = None
+    payment_id: str | None = None
+
+
+@dataclass(frozen=True)
+class CheckoutOrder:
+    """A checkout the booking layer asks a provider to host. Every value is decided on the server.
+
+    Attributes:
+        reference: The booking reference the payment is for.
+        amount_minor: The price in minor units, from the database.
+        currency: Upper-case ISO 4217 code.
+        description: What the customer sees they are paying for.
+        account_id: The business's payment account. The payment goes to it directly.
+        customer_email: Prefilled on the checkout page.
+        success_url: Where the payer returns after paying.
+        cancel_url: Where the payer returns after giving up.
+        expires_at: When the checkout stops accepting payment.
+    """
+
+    reference: str
+    amount_minor: int
+    currency: str
+    description: str
+    account_id: str
+    customer_email: str
+    success_url: str
+    cancel_url: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class HostedCheckout:
+    """A checkout page created by the provider.
+
+    Attributes:
+        checkout_id: The provider's identifier, stored with the booking.
+        checkout_url: Where to send the payer.
+    """
+
+    checkout_id: str
+    checkout_url: str
+
+
+@runtime_checkable
+class AccountPayments(Protocol):
+    """A provider through which each business takes payments into its own account.
+
+    Attributes:
+        name: The provider name, as in :class:`PaymentProvider`.
+        live: Whether real money can move.
+    """
+
+    name: str
+    live: bool
+
+    def create_account(self, business_name: str, contact_email: str | None, currency: str) -> str:
+        """Create a payment account for a business.
+
+        Args:
+            business_name: Shown to the business during sign-up with the provider.
+            contact_email: The business's contact email, if known.
+            currency: The business's upper-case ISO 4217 currency.
+
+        Returns:
+            The account identifier.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
+
+    def onboarding_url(self, account_id: str, return_url: str, refresh_url: str) -> str:
+        """Get a single-use link where the business completes its sign-up with the provider.
+
+        Args:
+            account_id: The account.
+            return_url: Where the provider sends the business afterwards.
+            refresh_url: Where the provider sends the business if the link has expired.
+
+        Returns:
+            The link.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
+
+    def can_take_payments(self, account_id: str) -> bool:
+        """Ask the provider whether the account can take card payments now.
+
+        Args:
+            account_id: The account.
+
+        Returns:
+            ``True`` when it can.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not be asked.
+        """
+        ...
+
+    def start_checkout(self, order: CheckoutOrder) -> HostedCheckout:
+        """Create a hosted checkout for an order, on the business's own account.
+
+        Args:
+            order: The order, built on the server.
+
+        Returns:
+            The checkout.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
 
 
 @runtime_checkable

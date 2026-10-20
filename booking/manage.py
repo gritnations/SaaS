@@ -32,6 +32,7 @@ from booking.service import (
     Service,
     SlotTakenError,
     hash_token,
+    release_expired_holds,
 )
 from postgres import Database
 
@@ -236,6 +237,7 @@ class ManageService:
                 current = loaded.managed
                 if not current.can_move:
                     raise TooLateError("This booking can no longer be moved online. Please contact the business.")
+                release_expired_holds(connection, current.business.id)
                 days = self._bookings._days(
                     connection, current.business, current.service, [day], exclude_reference=current.reference
                 )
