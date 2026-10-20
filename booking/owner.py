@@ -119,7 +119,8 @@ class OwnerBooking:
 
     Attributes:
         reference: Public booking reference.
-        status: ``confirmed`` or ``cancelled``.
+        status: ``confirmed``, ``cancelled``, ``pending_payment`` (held while the customer pays) or
+            ``expired`` (only listed when a payment arrived after its hold ran out, so it needs a refund).
         service_slug: The booked service's identifier.
         service_name: The booked service's name.
         starts_at: Start, aware.
@@ -130,6 +131,7 @@ class OwnerBooking:
         customer_phone: Customer phone, if given.
         customer_note: Customer's note, if given.
         created_at: When the booking was made.
+        payment_status: ``not_required``, ``awaiting`` or ``paid``.
     """
 
     reference: str
@@ -144,6 +146,7 @@ class OwnerBooking:
     customer_phone: str | None
     customer_note: str | None
     created_at: datetime
+    payment_status: str = "not_required"
 
 
 @dataclass(frozen=True)
@@ -213,7 +216,7 @@ class Settings:
 
 _BOOKING_COLUMNS = (
     "b.reference, b.status, s.slug, s.name, b.starts_at, b.ends_at, b.price_minor, b.customer_name, "
-    "b.customer_email, b.customer_phone, b.customer_note, b.created_at"
+    "b.customer_email, b.customer_phone, b.customer_note, b.created_at, b.payment_status"
 )
 _SERVICE_COLUMNS = "slug, name, duration_minutes, price_minor, active, sort_order"
 
@@ -347,7 +350,8 @@ class OwnerService:
             days: Number of days, capped at :data:`MAX_DAYS_PER_REQUEST`.
 
         Returns:
-            The business and its bookings in start order, cancelled ones included.
+            The business and its bookings in start order, cancelled ones included. Holds that ran out
+            unpaid are left out.
 
         Raises:
             NotFoundError: If the account does not manage the business.
@@ -360,7 +364,9 @@ class OwnerService:
             period_end = datetime.combine(start + timedelta(days=count), time.min, zone)
             rows = connection.execute(
                 f"SELECT {_BOOKING_COLUMNS} FROM bookings b JOIN services s ON s.id = b.service_id "
-                "WHERE b.business_id = %s AND b.starts_at >= %s AND b.starts_at < %s ORDER BY b.starts_at",
+                "WHERE b.business_id = %s AND b.starts_at >= %s AND b.starts_at < %s "
+                "AND NOT (b.status = 'expired' AND b.payment_status <> 'paid') "
+                "AND NOT (b.status = 'pending_payment' AND b.hold_expires_at <= now()) ORDER BY b.starts_at",
                 (business.id, period_start, period_end),
             ).fetchall()
         return business, [OwnerBooking(*row) for row in rows]

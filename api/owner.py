@@ -38,7 +38,9 @@ from booking.owner import (
     OwnerServiceRecord,
     Settings,
 )
+from booking.payments import PaymentsBackend
 from booking.service import Business, NotFoundError
+from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
 
 
@@ -310,6 +312,7 @@ class OwnerBookingOut(BaseModel):
         customer_phone: Customer phone, or ``None``.
         customer_note: Customer's note, or ``None``.
         created_at: When it was booked, ISO 8601.
+        payment_status: ``not_required``, ``awaiting`` or ``paid``.
     """
 
     reference: str
@@ -327,6 +330,7 @@ class OwnerBookingOut(BaseModel):
     customer_phone: str | None
     customer_note: str | None
     created_at: str
+    payment_status: str = "not_required"
 
 
 class BookingsOut(BaseModel):
@@ -606,6 +610,7 @@ def _booking_out(business: Business, booking: OwnerBooking) -> OwnerBookingOut:
         customer_phone=booking.customer_phone,
         customer_note=booking.customer_note,
         created_at=booking.created_at.astimezone(zone).isoformat(),
+        payment_status=booking.payment_status,
     )
 
 
@@ -677,12 +682,43 @@ def _parse_time(value: str) -> time:
     return time(int(value[:2]), int(value[3:]))
 
 
-def build_router(verifier: Callable[[], TokenVerifier | None], backend: Callable[[], OwnerBackend | None]) -> APIRouter:
+class PaymentsOut(BaseModel):
+    """A business's online payment set-up.
+
+    Attributes:
+        available: Online payments are offered on this platform at all.
+        provider: The payment provider's name, or ``None`` when not available.
+        connected: The business has an account with the provider.
+        enabled: The account can take payments, so paid services can be booked online.
+    """
+
+    available: bool
+    provider: str | None
+    connected: bool
+    enabled: bool
+
+
+class ConnectOut(BaseModel):
+    """Where the owner completes their sign-up with the payment provider.
+
+    Attributes:
+        url: The provider's single-use link.
+    """
+
+    url: str
+
+
+def build_router(
+    verifier: Callable[[], TokenVerifier | None],
+    backend: Callable[[], OwnerBackend | None],
+    payments: Callable[[], PaymentsBackend | None] = lambda: None,
+) -> APIRouter:
     """Build the owner routes.
 
     Args:
         verifier: Returns the token verifier, or ``None`` when sign-in is not configured.
         backend: Returns the owner service, or ``None`` when the database is not configured.
+        payments: Returns the payment service, or ``None`` when online payments are not configured.
 
     Returns:
         The router, to be included in the API.
@@ -945,5 +981,47 @@ def build_router(verifier: Callable[[], TokenVerifier | None], backend: Callable
         """
         found, item = answer(lambda: service().cancel_booking(who, business, reference))
         return _booking_out(found, item)
+
+    @router.get("/businesses/{business}/payments", response_model=PaymentsOut)
+    def get_payments(who: Account, business: Slug) -> PaymentsOut:
+        """Read the business's online payment set-up, refreshed from the provider.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The set-up. ``available`` is ``False`` when online payments are not configured here.
+        """
+        found = payments()
+        if found is None:
+            service()
+            return PaymentsOut(available=False, provider=None, connected=False, enabled=False)
+        current = answer(lambda: found.settings(who, business))
+        return PaymentsOut(
+            available=True, provider=current.provider, connected=current.connected, enabled=current.enabled
+        )
+
+    @router.post("/businesses/{business}/payments/connect", response_model=ConnectOut)
+    def connect_payments(who: Account, business: Slug) -> ConnectOut:
+        """Start or continue the business's sign-up with the payment provider.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The provider's link. The page sends the owner there.
+
+        Raises:
+            HTTPException: 503 when online payments are not configured or the provider cannot be reached.
+        """
+        found = payments()
+        if found is None:
+            raise HTTPException(status_code=503, detail="Online payments are not available yet.")
+        try:
+            return ConnectOut(url=answer(lambda: found.connect(who, business)))
+        except ProviderUnavailableError:
+            raise HTTPException(status_code=503, detail="Online payments are unavailable right now.") from None
 
     return router

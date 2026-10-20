@@ -3,7 +3,8 @@
 Routes, all scoped to one business by its public slug:
     * ``GET /businesses/{business}/services``: the services offered.
     * ``GET /businesses/{business}/availability``: a service's sessions for a run of days.
-    * ``POST /businesses/{business}/bookings``: book a session of a free service.
+    * ``POST /businesses/{business}/bookings``: book a session. A paid service answers with a checkout
+      link and the booking waits for its payment.
 
 This module validates the shape of requests and turns booking outcomes into HTTP answers. Every rule
 about prices, sessions and overlaps lives in ``booking.service``. No internal identifier is returned.
@@ -197,11 +198,11 @@ class BookingBody(BaseModel):
 
 
 class BookingOut(BaseModel):
-    """A confirmed booking.
+    """A new booking.
 
     Attributes:
         reference: Public booking reference.
-        status: Always ``confirmed`` in this slice.
+        status: ``confirmed``, or ``pending_payment`` for a paid service until its payment is confirmed.
         service: The booked service.
         date: Local date.
         time: Local start as ``HH:MM``.
@@ -209,6 +210,8 @@ class BookingOut(BaseModel):
         starts_at: Start, ISO 8601 with offset.
         ends_at: End, ISO 8601 with offset.
         manage_token: The private code for managing this booking. Returned once, only to the person who booked.
+            A paid booking has none here: its manage link is emailed once the payment is confirmed.
+        checkout_url: Where to pay, for a paid service.
     """
 
     reference: str
@@ -220,6 +223,7 @@ class BookingOut(BaseModel):
     starts_at: str
     ends_at: str
     manage_token: str | None = None
+    checkout_url: str | None = None
 
 
 def _slot_out(slot: Slot) -> SlotOut:
@@ -332,18 +336,19 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
 
     @router.post("/bookings", response_model=BookingOut, status_code=201)
     def create_booking(business: Slug, body: BookingBody) -> BookingOut:
-        """Book a session of a free service.
+        """Book a session: confirmed for a free service, held with a checkout link for a paid one.
 
         Args:
             business: The business slug.
             body: The customer's request.
 
         Returns:
-            The confirmed booking.
+            The booking.
 
         Raises:
-            HTTPException: 404 for an unknown business or service, 402 for a paid service, 409 when the
-                time is not available or was just taken, 503 when the database is unreachable.
+            HTTPException: 404 for an unknown business or service, 402 for a paid service the business
+                cannot take payment for now, 409 when the time is not available or was just taken, 503
+                when the database is unreachable.
         """
         request = BookingRequest(
             service=body.service,
@@ -367,7 +372,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
         offered = confirmed.service
         return BookingOut(
             reference=confirmed.reference,
-            status="confirmed",
+            status=confirmed.status,
             service=service_out(offered.slug, offered.name, offered.duration_minutes, offered.price_minor),
             date=request.date,
             time=confirmed.slot.time,
@@ -375,6 +380,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             starts_at=confirmed.slot.starts_at.isoformat(),
             ends_at=confirmed.slot.ends_at.isoformat(),
             manage_token=confirmed.manage_token,
+            checkout_url=confirmed.checkout_url,
         )
 
     return router

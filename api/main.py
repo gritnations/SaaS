@@ -5,7 +5,8 @@ Routes:
     * ``GET /health/ready``: infrastructure readiness. Coarse status only.
     * ``GET /metrics``: operational metrics. Open outside production, protected or absent in production.
     * ``POST /payments/{provider}/checkout`` and ``POST /payments/{provider}/webhook``: the
-      provider-neutral payment boundary. No provider is live.
+      provider-neutral payment boundary. No provider is live. Stripe, when configured in test mode,
+      receives its notifications here; a verified one is recorded against its booking.
     * ``/businesses/{business}/...``: public booking routes, defined in ``api.booking``.
     * ``/owner/...``: signed-in owner routes, defined in ``api.owner``.
     * ``/businesses/{business}/bookings/{reference}/...``: manage-link routes, defined in ``api.manage``.
@@ -19,6 +20,8 @@ Environment variables read:
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
     * ``SUPABASE_URL``: read by ``api.auth`` to verify owner sign-in tokens.
     * ``RESEND_API_KEY`` and ``EMAIL_FROM``: read by ``mail``. ``PUBLIC_SITE_URL``: read by ``booking.notify``.
+    * ``STRIPE_SECRET_KEY`` and ``STRIPE_WEBHOOK_SECRET``: read by ``payments.stripe``. Secrets. Paid
+      services can be booked only when both and ``PUBLIC_SITE_URL`` are set.
 
 Constraints:
     * Importing this module and calling :func:`create_api` perform no network I/O.
@@ -44,6 +47,7 @@ from api.metrics import Metrics
 from booking.manage import ManageService
 from booking.notify import Notifier, site_url_from_environment
 from booking.owner import OwnerService
+from booking.payments import PaymentsBackend, PaymentService
 from booking.service import BookingBackend, BookingService
 from mail import mailer_from_environment, sender_domain
 from payments.base import (
@@ -55,8 +59,9 @@ from payments.base import (
     WebhookRejectedError,
 )
 from payments.paymob import PaymobProvider
+from payments.stripe import stripe_from_environment
 from payments.stub import StubProvider
-from postgres import Database, DatabaseConfigError, DatabaseSettings
+from postgres import Database, DatabaseConfigError, DatabaseSettings, DatabaseUnavailableError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -139,7 +144,7 @@ class WebhookOut(BaseModel):
         accepted: The notification was parsed and trusted by the provider adapter.
         provider: The provider that parsed it.
         live: ``True`` only when the notification describes real money.
-        recorded: Whether anything was stored. Always ``False``: there is no payment store yet.
+        recorded: Whether a booking changed because of it.
     """
 
     accepted: bool
@@ -187,17 +192,18 @@ def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
     return token
 
 
-def build_registry(environment: str) -> PaymentRegistry:
+def build_registry(environment: str, extra: list[PaymentProvider] | None = None) -> PaymentRegistry:
     """Choose the payment providers for an environment.
 
     Args:
         environment: The value returned by :func:`resolve_environment`.
+        extra: Configured providers that verify their notifications, such as Stripe.
 
     Returns:
-        A registry holding Paymob everywhere, and the stub only outside production. The stub accepts
-        unsigned notifications, so it is never registered in production.
+        A registry holding Paymob everywhere, the extra providers, and the stub only outside production.
+        The stub accepts unsigned notifications, so it is never registered in production.
     """
-    providers: list[PaymentProvider] = [PaymobProvider()]
+    providers: list[PaymentProvider] = [PaymobProvider(), *(extra or [])]
     if environment != "production":
         providers.append(StubProvider())
     return PaymentRegistry(providers)
@@ -230,6 +236,7 @@ def create_api(
     owners: owner_routes.OwnerBackend | None = None,
     verifier: TokenVerifier | None = None,
     manage: manage_routes.ManageBackend | None = None,
+    payments: PaymentsBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -242,6 +249,8 @@ def create_api(
         verifier: The sign-in token verifier. ``None`` means build it from ``SUPABASE_URL``; without
             that variable the owner routes answer 503.
         manage: The manage-link service. ``None`` means build it the same way as ``bookings``.
+        payments: The payment service. ``None`` means build it from the Stripe settings and
+            ``PUBLIC_SITE_URL`` on a real database; without them online payments are not offered.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -252,11 +261,13 @@ def create_api(
         api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
         mail.MailConfigError: If ``RESEND_API_KEY`` is set without a valid ``EMAIL_FROM``.
         booking.notify.NotifyConfigError: If ``PUBLIC_SITE_URL`` is set but invalid.
+        payments.stripe.StripeConfigError: If the Stripe settings are incomplete, live or malformed.
     """
     env = os.environ if environ is None else environ
     environment = resolve_environment(env)
     metrics_token = resolve_metrics_token(env)
-    registry = build_registry(environment)
+    stripe_provider = stripe_from_environment(env)
+    registry = build_registry(environment, [stripe_provider] if stripe_provider is not None else None)
     probe = database if database is not None else database_from_environment(env)
     metrics = Metrics(API_VERSION)
 
@@ -270,9 +281,12 @@ def create_api(
     api.state.database = probe
     api.state.environment = environment
     if isinstance(probe, Database):
-        notifier = Notifier(probe, mailer_from_environment(env), site_url_from_environment(env), sender_domain(env))
+        site_url = site_url_from_environment(env)
+        notifier = Notifier(probe, mailer_from_environment(env), site_url, sender_domain(env))
         if bookings is None:
-            bookings = BookingService(probe, notifier=notifier)
+            bookings = BookingService(probe, notifier=notifier, payments=stripe_provider, site_url=site_url)
+        if payments is None and stripe_provider is not None and site_url is not None:
+            payments = PaymentService(probe, stripe_provider, site_url, notifier=notifier)
         if owners is None:
             owners = OwnerService(probe, notifier=notifier)
         if manage is None:
@@ -280,7 +294,7 @@ def create_api(
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
-    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners))
+    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners, lambda: payments))
     api.include_router(manage_routes.build_router(lambda: manage))
 
     @api.middleware("http")
@@ -438,11 +452,11 @@ def create_api(
             request: The raw request. The adapter receives the exact bytes and the headers.
 
         Returns:
-            Confirmation that the adapter accepted the notification. Nothing is stored.
+            Confirmation that the adapter accepted the notification, and whether a booking changed.
 
         Raises:
             HTTPException: 404 for an unknown provider. 501 when the provider is not live. 400 when the
-               adapter rejects the notification.
+               adapter rejects the notification. 503 when the database is unreachable, so the provider retries.
         """
         adapter = provider_for(provider)
         headers = {name.lower(): value for name, value in request.headers.items()}
@@ -452,11 +466,19 @@ def create_api(
             raise HTTPException(status_code=501, detail="This payment provider is not live.") from None
         except WebhookRejectedError:
             raise HTTPException(status_code=400, detail="Webhook rejected.") from None
+        recorded = False
+        if payments is not None and stripe_provider is not None and event.provider == stripe_provider.name:
+            try:
+                recorded = payments.record(event)
+            except DatabaseUnavailableError:
+                raise HTTPException(status_code=503, detail="Try again later.") from None
         LOGGER.info(
-            "payment notification accepted provider=%s live=%s",
+            "payment notification accepted provider=%s live=%s status=%s recorded=%s",
             event.provider,
             event.live,
+            event.status,
+            recorded,
         )
-        return WebhookOut(accepted=True, provider=event.provider, live=event.live)
+        return WebhookOut(accepted=True, provider=event.provider, live=event.live, recorded=recorded)
 
     return api
