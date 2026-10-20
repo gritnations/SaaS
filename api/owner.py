@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from api.auth import TokenError, TokenVerifier
 from api.booking import EMAIL_PATTERN, SLUG_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
+from booking.billing import BillingBackend
 from booking.owner import (
     BUSINESS_TYPES,
     MAX_DAYS_PER_REQUEST,
@@ -222,12 +223,18 @@ class MembershipOut(BaseModel):
         name: Display name.
         role: The account's role.
         display_name: The owner's name as given at sign-up, or ``None``.
+        plan: ``free``, ``starter`` or ``pro``.
+        plan_status: ``active``, ``awaiting_payment`` or ``past_due``.
+        checkout_url: Where to pay, when a paid plan was just chosen.
     """
 
     slug: str
     name: str
     role: str
     display_name: str | None = None
+    plan: str = "free"
+    plan_status: str = "active"
+    checkout_url: str | None = None
 
 
 class NewBusinessBody(BaseModel):
@@ -238,7 +245,7 @@ class NewBusinessBody(BaseModel):
         business_type: The kind of business.
         business_type_other: A short description, required when the type is ``other``.
         owner_name: The owner's name. Private.
-        plan: The chosen plan. Only ``free`` is available.
+        plan: The chosen plan: ``free``, or a paid plan that is paid for straight after.
         contact_email: Where booking emails go. Optional.
     """
 
@@ -708,10 +715,32 @@ class ConnectOut(BaseModel):
     url: str
 
 
+def _membership_out(found: Membership, checkout_url: str | None = None) -> MembershipOut:
+    """Convert a membership for the response.
+
+    Args:
+        found: The membership.
+        checkout_url: The plan checkout link, if one was just started.
+
+    Returns:
+        Its public form for the owner.
+    """
+    return MembershipOut(
+        slug=found.slug,
+        name=found.name,
+        role=found.role,
+        display_name=found.display_name,
+        plan=found.plan,
+        plan_status=found.plan_status,
+        checkout_url=checkout_url,
+    )
+
+
 def build_router(
     verifier: Callable[[], TokenVerifier | None],
     backend: Callable[[], OwnerBackend | None],
     payments: Callable[[], PaymentsBackend | None] = lambda: None,
+    billing: Callable[[], BillingBackend | None] = lambda: None,
 ) -> APIRouter:
     """Build the owner routes.
 
@@ -719,6 +748,7 @@ def build_router(
         verifier: Returns the token verifier, or ``None`` when sign-in is not configured.
         backend: Returns the owner service, or ``None`` when the database is not configured.
         payments: Returns the payment service, or ``None`` when online payments are not configured.
+        billing: Returns the plan billing service, or ``None`` when paid plans cannot be billed.
 
     Returns:
         The router, to be included in the API.
@@ -800,11 +830,7 @@ def build_router(
             The memberships.
         """
         found = answer(lambda: service().memberships(who))
-        return MeOut(
-            businesses=[
-                MembershipOut(slug=m.slug, name=m.name, role=m.role, display_name=m.display_name) for m in found
-            ]
-        )
+        return MeOut(businesses=[_membership_out(m) for m in found])
 
     @router.post("/businesses", response_model=MembershipOut, status_code=201)
     def create_business(who: Account, body: NewBusinessBody) -> MembershipOut:
@@ -815,13 +841,25 @@ def build_router(
             body: The sign-up details.
 
         Returns:
-            The new membership, with the business's slug.
+            The new membership, with the business's slug. On a paid plan it also carries the checkout link;
+            if that link cannot be made now, the business stays waiting to pay and the owner can retry.
+
+        Raises:
+            HTTPException: 503 for a paid plan when paid plans cannot be billed here.
         """
+        if body.plan != "free" and billing() is None:
+            raise HTTPException(status_code=503, detail="Paid plans are not available yet.")
         new = NewBusiness(
             body.name, body.business_type, body.business_type_other, body.owner_name, body.plan, body.contact_email
         )
         made = answer(lambda: service().create_business(who, new))
-        return MembershipOut(slug=made.slug, name=made.name, role=made.role, display_name=made.display_name)
+        found = billing()
+        if made.plan == "free" or found is None:
+            return _membership_out(made)
+        try:
+            return _membership_out(made, answer(lambda: found.start_checkout(who, made.slug)))
+        except ProviderUnavailableError:
+            return _membership_out(made)
 
     @router.get("/businesses/{business}/bookings", response_model=BookingsOut)
     def bookings(
@@ -1023,5 +1061,73 @@ def build_router(
             return ConnectOut(url=answer(lambda: found.connect(who, business)))
         except ProviderUnavailableError:
             raise HTTPException(status_code=503, detail="Online payments are unavailable right now.") from None
+
+    def require_billing() -> BillingBackend:
+        """Get the billing service, or answer 503 when there is none.
+
+        Returns:
+            The billing service.
+
+        Raises:
+            HTTPException: 503 when paid plans cannot be billed here.
+        """
+        found = billing()
+        if found is None:
+            raise HTTPException(status_code=503, detail="Paid plans are not available yet.")
+        return found
+
+    @router.post("/businesses/{business}/billing/checkout", response_model=ConnectOut)
+    def plan_checkout(who: Account, business: Slug) -> ConnectOut:
+        """Start the payment for a paid plan that is not paid yet.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The provider's checkout link.
+
+        Raises:
+            HTTPException: 422 when nothing is waiting to be paid, 503 when the provider cannot be reached.
+        """
+        found = require_billing()
+        try:
+            return ConnectOut(url=answer(lambda: found.start_checkout(who, business)))
+        except ProviderUnavailableError:
+            raise HTTPException(status_code=503, detail="Payment is unavailable right now.") from None
+
+    @router.post("/businesses/{business}/billing/free", response_model=MembershipOut)
+    def plan_free(who: Account, business: Slug) -> MembershipOut:
+        """Switch a business that has not paid for its paid plan to the free plan.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The membership on the free plan.
+        """
+        found = require_billing()
+        return _membership_out(answer(lambda: found.choose_free(who, business)))
+
+    @router.post("/businesses/{business}/billing/portal", response_model=ConnectOut)
+    def plan_portal(who: Account, business: Slug) -> ConnectOut:
+        """Open the provider's page where the business manages its subscription.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The provider's link.
+
+        Raises:
+            HTTPException: 422 when the business has never subscribed, 503 when the provider cannot be reached.
+        """
+        found = require_billing()
+        try:
+            return ConnectOut(url=answer(lambda: found.portal(who, business)))
+        except ProviderUnavailableError:
+            raise HTTPException(status_code=503, detail="Subscription management is unavailable right now.") from None
 
     return router

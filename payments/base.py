@@ -82,13 +82,17 @@ class PaymentEvent:
         provider: The name of the provider that sent the notification.
         order_reference: The order the notification is about.
         status: The reported outcome: ``"paid"``, ``"failed"``, ``"expired"``, or ``"ignored"`` for a
-            verified notification that needs no action.
+            verified notification that needs no action. For a business's own subscription to a plan:
+            ``"subscription_active"``, ``"subscription_past_due"`` or ``"subscription_ended"``.
         live: ``True`` only when the event describes real money.
         checkout_id: The provider's checkout identifier, when the notification is about a checkout.
         account_id: The business's payment account the notification came from, if any.
         amount_minor: The amount paid, in minor units, as the provider reports it.
         currency: The currency paid, as an upper-case ISO 4217 code.
         payment_id: The provider's payment identifier, when known.
+        subscription_id: The provider's subscription identifier, for a subscription event.
+        customer_id: The provider's customer identifier, for a subscription event.
+        plan: The plan the subscription is for, as recorded when it was started.
     """
 
     provider: str
@@ -100,6 +104,78 @@ class PaymentEvent:
     amount_minor: int | None = None
     currency: str | None = None
     payment_id: str | None = None
+    subscription_id: str | None = None
+    customer_id: str | None = None
+    plan: str | None = None
+
+
+@dataclass(frozen=True)
+class SubscriptionOrder:
+    """A business's subscription to a paid plan, billed to the platform. Every value is decided on the server.
+
+    Attributes:
+        business_id: The business, recorded on the subscription so that notifications can be matched.
+        plan: The plan key, such as ``starter``.
+        plan_name: The plan's display name.
+        amount_minor: The monthly price in minor units.
+        currency: Upper-case ISO 4217 code.
+        customer_email: Prefilled when the business has no customer record yet.
+        customer_id: The business's existing customer record with the provider, if any.
+        success_url: Where the owner returns after subscribing.
+        cancel_url: Where the owner returns after giving up.
+    """
+
+    business_id: str
+    plan: str
+    plan_name: str
+    amount_minor: int
+    currency: str
+    customer_email: str | None
+    customer_id: str | None
+    success_url: str
+    cancel_url: str
+
+
+@runtime_checkable
+class SubscriptionBilling(Protocol):
+    """A provider through which the platform bills businesses for their plan.
+
+    Attributes:
+        name: The provider name, as in :class:`PaymentProvider`.
+        live: Whether real money can move.
+    """
+
+    name: str
+    live: bool
+
+    def start_subscription(self, order: SubscriptionOrder) -> "HostedCheckout":
+        """Create a hosted checkout that starts a monthly subscription on the platform's own account.
+
+        Args:
+            order: The order, built on the server.
+
+        Returns:
+            The checkout.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
+
+    def billing_portal_url(self, customer_id: str, return_url: str) -> str:
+        """Get a single-use link to the provider's page where a business manages its subscription.
+
+        Args:
+            customer_id: The business's customer record.
+            return_url: Where the provider sends the owner afterwards.
+
+        Returns:
+            The link.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
 
 
 @dataclass(frozen=True)

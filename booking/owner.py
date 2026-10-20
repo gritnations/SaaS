@@ -44,8 +44,12 @@ BUSINESS_TYPES = (
 )
 """The kinds of business an owner can choose at sign-up. Matches the database check."""
 
-PLANS = ("free",)
-"""Plans that can be chosen today. Paid plans are added once they are decided."""
+PLANS = ("free", "starter", "pro")
+"""Plans that can be chosen. Matches the database check."""
+
+PLAN_PRICES = {"starter": ("Starter", 900), "pro": ("Pro", 2900)}
+"""``plan -> (display name, monthly price in pence)`` for the paid plans. Test placeholders until the real
+plans and prices are decided. Every paid plan currently includes the same features as the free plan."""
 
 DEFAULT_HOURS = [(weekday, time(9, 0), time(17, 0)) for weekday in range(1, 6)]
 """Monday to Friday, 09:00 to 17:00, for a new business."""
@@ -84,12 +88,17 @@ class Membership:
         name: Display name.
         role: The account's role, currently always ``owner``.
         display_name: The owner's name as given at sign-up, or ``None``. Private to the dashboard.
+        plan: ``free``, ``starter`` or ``pro``.
+        plan_status: ``active``, ``awaiting_payment`` (a paid plan not yet paid) or ``past_due`` (a renewal
+            failed).
     """
 
     slug: str
     name: str
     role: str
     display_name: str | None = None
+    plan: str = "free"
+    plan_status: str = "active"
 
 
 @dataclass(frozen=True)
@@ -270,7 +279,8 @@ class OwnerService:
         """
         with self._database.connection() as connection:
             rows = connection.execute(
-                "SELECT b.slug, b.name, m.role, m.display_name FROM business_members m JOIN businesses b ON b.id = m.business_id "
+                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status "
+                "FROM business_members m JOIN businesses b ON b.id = m.business_id "
                 "WHERE m.user_id = %s ORDER BY b.name",
                 (account,),
             ).fetchall()
@@ -280,7 +290,8 @@ class OwnerService:
         """Create the account's business with sensible defaults, in one transaction.
 
         The business gets a unique slug from its name, Monday to Friday 09:00 to 17:00, one free 30-minute
-        service, GBP and UK time (the table defaults), and the account as its owner.
+        service, GBP and UK time (the table defaults), and the account as its owner. On a paid plan it
+        starts as ``awaiting_payment``, and its booking page stays closed until the plan is paid.
 
         Args:
             account: The verified account identifier.
@@ -315,9 +326,17 @@ class OwnerService:
                     slug = base[: 40 - len(suffix)].rstrip("-") + suffix
                     counter += 1
                 row: Any = connection.execute(
-                    "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, contact_email) "
-                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",
-                    (slug, new.name, new.business_type, new.business_type_other, new.plan, new.contact_email),
+                    "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, plan_status, "
+                    "contact_email) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id::text",
+                    (
+                        slug,
+                        new.name,
+                        new.business_type,
+                        new.business_type_other,
+                        new.plan,
+                        "active" if new.plan == "free" else "awaiting_payment",
+                        new.contact_email,
+                    ),
                 ).fetchone()
                 business_id = str(row[0])
                 connection.execute(
@@ -338,7 +357,9 @@ class OwnerService:
                     )
         except errors.UniqueViolation:
             raise ConflictError("This account already has a business.") from None
-        return Membership(slug, new.name, "owner", new.owner_name)
+        return Membership(
+            slug, new.name, "owner", new.owner_name, new.plan, "active" if new.plan == "free" else "awaiting_payment"
+        )
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """List bookings that start within a run of local days, with customer details.

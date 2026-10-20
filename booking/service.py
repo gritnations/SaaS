@@ -335,11 +335,11 @@ class BookingService:
             The business.
 
         Raises:
-            NotFoundError: If no business has that slug.
+            NotFoundError: If no business has that slug, or its paid plan is not paid yet.
         """
         row = connection.execute(
             "SELECT id::text, slug, name, time_zone, currency, break_minutes, notice_minutes, window_days, "
-            "payment_account_id, payments_enabled FROM businesses WHERE slug = %s",
+            "payment_account_id, payments_enabled FROM businesses WHERE slug = %s AND plan_status <> 'awaiting_payment'",
             (slug,),
         ).fetchone()
         if row is None:
