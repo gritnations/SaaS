@@ -18,7 +18,7 @@ from typing import Any
 import psycopg
 from psycopg import errors
 
-from booking.service import BookingError, Business, NotFoundError
+from booking.service import BookingError, BookingNotifier, Business, NotFoundError
 from postgres import Database
 
 MAX_DAYS_PER_REQUEST = 62
@@ -133,6 +133,10 @@ class Settings:
         break_minutes: Break between sessions.
         notice_minutes: How long before a session it may still be booked.
         window_days: How many days ahead, counting today, are open for booking.
+        cancel_cutoff_minutes: How long before a session a customer may still cancel online.
+        move_cutoff_minutes: How long before a session a customer may still move it online.
+        contact_email: Where the business receives booking emails, or ``None``.
+        meeting_link: A link included in customer emails, or ``None``.
     """
 
     name: str
@@ -141,6 +145,10 @@ class Settings:
     break_minutes: int
     notice_minutes: int
     window_days: int
+    cancel_cutoff_minutes: int = 1440
+    move_cutoff_minutes: int = 1440
+    contact_email: str | None = None
+    meeting_link: str | None = None
 
 
 _BOOKING_COLUMNS = (
@@ -153,13 +161,15 @@ _SERVICE_COLUMNS = "slug, name, duration_minutes, price_minor, active, sort_orde
 class OwnerService:
     """Owner operations backed by PostgreSQL."""
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, notifier: BookingNotifier | None = None) -> None:
         """Create the service. Performs no I/O.
 
         Args:
             database: The database boundary.
+            notifier: Sends booking emails after an owner change is committed. ``None`` sends nothing.
         """
         self._database = database
+        self._notifier = notifier
 
     @staticmethod
     def _member_business(connection: psycopg.Connection[Any], account: str, slug: str) -> Business:
@@ -406,15 +416,20 @@ class OwnerService:
         return sorted(blocks, key=lambda block: (block.weekday, block.start))
 
     @staticmethod
-    def _settings(business: Business) -> Settings:
-        """Read the settings out of a loaded business.
+    def _settings(connection: psycopg.Connection[Any], business: Business) -> Settings:
+        """Read the settings of a loaded business, including the notification and manage-link rules.
 
         Args:
+            connection: An open connection.
             business: The business.
 
         Returns:
             Its settings.
         """
+        extra: Any = connection.execute(
+            "SELECT cancel_cutoff_minutes, move_cutoff_minutes, contact_email, meeting_link FROM businesses WHERE id = %s",
+            (business.id,),
+        ).fetchone()
         return Settings(
             business.name,
             business.time_zone,
@@ -422,6 +437,7 @@ class OwnerService:
             business.break_minutes,
             business.notice_minutes,
             business.window_days,
+            *extra,
         )
 
     def settings(self, account: str, slug: str) -> Settings:
@@ -438,7 +454,7 @@ class OwnerService:
             NotFoundError: If the account does not manage the business.
         """
         with self._database.connection() as connection:
-            return self._settings(self._member_business(connection, account, slug))
+            return self._settings(connection, self._member_business(connection, account, slug))
 
     def update_settings(self, account: str, slug: str, changes: dict[str, Any]) -> Settings:
         """Change some booking settings. Existing bookings are not affected.
@@ -446,8 +462,9 @@ class OwnerService:
         Args:
             account: The verified account identifier.
             slug: The business's public identifier.
-            changes: Fields to change, from ``name``, ``break_minutes``, ``notice_minutes`` and
-                ``window_days``. Values are validated by the API.
+            changes: Fields to change, from ``name``, ``break_minutes``, ``notice_minutes``, ``window_days``,
+                ``cancel_cutoff_minutes``, ``move_cutoff_minutes``, ``contact_email`` and ``meeting_link``
+                (``None`` clears the last two). Values are validated by the API.
 
         Returns:
             The updated settings.
@@ -455,7 +472,16 @@ class OwnerService:
         Raises:
             NotFoundError: If the account does not manage the business.
         """
-        allowed = {"name", "break_minutes", "notice_minutes", "window_days"}
+        allowed = {
+            "name",
+            "break_minutes",
+            "notice_minutes",
+            "window_days",
+            "cancel_cutoff_minutes",
+            "move_cutoff_minutes",
+            "contact_email",
+            "meeting_link",
+        }
         fields = [field for field in changes if field in allowed]
         with self._database.connection() as connection:
             business = self._member_business(connection, account, slug)
@@ -466,4 +492,41 @@ class OwnerService:
                     (*[changes[field] for field in fields], business.id),
                 )
                 business = self._member_business(connection, account, slug)
-            return self._settings(business)
+            return self._settings(connection, business)
+
+    def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
+        """Cancel a booking on the business's behalf. No deadline applies; the customer is emailed.
+
+        Cancelling an already cancelled booking changes nothing and sends nothing.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+            reference: The booking reference, in any letter case.
+
+        Returns:
+            The business and the booking after the change.
+
+        Raises:
+            NotFoundError: If the account does not manage the business, or it has no such booking.
+        """
+        wanted = reference.strip().upper()
+        if not REFERENCE_PATTERN.match(wanted):
+            raise NotFoundError("Booking not found.")
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            changed: Any = connection.execute(
+                "UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'owner' "
+                "WHERE business_id = %s AND reference = %s AND status = 'confirmed' RETURNING id::text",
+                (business.id, wanted),
+            ).fetchone()
+            row = connection.execute(
+                f"SELECT {_BOOKING_COLUMNS} FROM bookings b JOIN services s ON s.id = b.service_id "
+                "WHERE b.business_id = %s AND b.reference = %s",
+                (business.id, wanted),
+            ).fetchone()
+        if row is None:
+            raise NotFoundError("Booking not found.")
+        if changed is not None and self._notifier is not None:
+            self._notifier.booking_event("cancelled", str(changed[0]), None)
+        return business, OwnerBooking(*row)

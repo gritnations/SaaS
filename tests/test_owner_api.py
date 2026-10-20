@@ -6,6 +6,7 @@ business's time zone, and the browser may send the owner's edits from the allowe
 checks against a real database are covered by ``test_owner_postgres.py``.
 """
 
+import dataclasses
 from datetime import UTC, date, datetime, time
 from typing import Any
 
@@ -224,6 +225,20 @@ class FakeOwners:
         """
         self._record("settings", account, slug)
         return SETTINGS
+
+    def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
+        """Return the booking as cancelled.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+            reference: Reference.
+
+        Returns:
+            The business and the cancelled booking.
+        """
+        self._record("cancel_booking", account, slug, reference)
+        return BUSINESS, dataclasses.replace(BOOKING, status="cancelled")
 
     def update_settings(self, account: str, slug: str, changes: dict[str, object]) -> Settings:
         """Return the settings.

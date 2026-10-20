@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from api.auth import TokenError, TokenVerifier
-from api.booking import SLUG_PATTERN, Slug
+from api.booking import EMAIL_PATTERN, SLUG_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
 from booking.owner import (
     MAX_DAYS_PER_REQUEST,
@@ -155,6 +155,19 @@ class OwnerBackend(Protocol):
 
         Returns:
             The settings.
+        """
+        ...
+
+    def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
+        """See :meth:`booking.owner.OwnerService.cancel_booking`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+            reference: Booking reference.
+
+        Returns:
+            The business and the booking after the change.
         """
         ...
 
@@ -386,6 +399,10 @@ class SettingsOut(BaseModel):
         break_minutes: Break between sessions.
         notice_minutes: How long before a session it may still be booked.
         window_days: How many days ahead, counting today, are open for booking.
+        cancel_cutoff_minutes: How long before a session a customer may still cancel online.
+        move_cutoff_minutes: How long before a session a customer may still move it online.
+        contact_email: Where the business receives booking emails, or ``None``.
+        meeting_link: A link included in customer emails, or ``None``.
     """
 
     name: str
@@ -394,6 +411,10 @@ class SettingsOut(BaseModel):
     break_minutes: int
     notice_minutes: int
     window_days: int
+    cancel_cutoff_minutes: int
+    move_cutoff_minutes: int
+    contact_email: str | None
+    meeting_link: str | None
 
 
 class SettingsBody(BaseModel):
@@ -404,14 +425,73 @@ class SettingsBody(BaseModel):
         break_minutes: Break between sessions, 0 to 240.
         notice_minutes: Notice period, 0 to 43200 (30 days).
         window_days: Booking window, 1 to 365.
+        cancel_cutoff_minutes: Online cancellation closes this long before a session, 0 to 43200.
+        move_cutoff_minutes: Online moving closes this long before a session, 0 to 43200.
+        contact_email: Where booking emails go. An empty string clears it.
+        meeting_link: An ``https://`` link for customers. An empty string clears it.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     name: Name | None = None
     break_minutes: Annotated[int, Field(ge=0, le=240)] | None = None
     notice_minutes: Annotated[int, Field(ge=0, le=43200)] | None = None
     window_days: Annotated[int, Field(ge=1, le=365)] | None = None
+    cancel_cutoff_minutes: Annotated[int, Field(ge=0, le=43200)] | None = None
+    move_cutoff_minutes: Annotated[int, Field(ge=0, le=43200)] | None = None
+    contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
+    meeting_link: Annotated[str, StringConstraints(max_length=500)] | None = None
+
+    @field_validator("contact_email")
+    @classmethod
+    def check_email(cls, value: str | None) -> str | None:
+        """Accept a plausible address, or an empty string to clear.
+
+        Args:
+            value: The submitted address.
+
+        Returns:
+            The address, or an empty string.
+
+        Raises:
+            ValueError: If it is neither.
+        """
+        if value and not EMAIL_PATTERN.match(value):
+            raise ValueError("not an email address")
+        return value
+
+    @field_validator("meeting_link")
+    @classmethod
+    def check_link(cls, value: str | None) -> str | None:
+        """Accept an ``https://`` link without spaces, or an empty string to clear.
+
+        Args:
+            value: The submitted link.
+
+        Returns:
+            The link, or an empty string.
+
+        Raises:
+            ValueError: If it is neither.
+        """
+        if value and (not value.startswith("https://") or any(c.isspace() for c in value) or len(value) < 12):
+            raise ValueError("not an https link")
+        return value
+
+    def changes(self) -> dict[str, object]:
+        """List the fields to change. Sent-but-empty contact email or meeting link means clear.
+
+        Returns:
+            Field name to new value.
+        """
+        sent = self.model_dump(exclude_unset=True)
+        out: dict[str, object] = {}
+        for name, value in sent.items():
+            if name in ("contact_email", "meeting_link"):
+                out[name] = value or None
+            elif value is not None:
+                out[name] = value
+        return out
 
 
 def _clock(value: time) -> str:
@@ -508,6 +588,10 @@ def _settings_out(settings: Settings) -> SettingsOut:
         break_minutes=settings.break_minutes,
         notice_minutes=settings.notice_minutes,
         window_days=settings.window_days,
+        cancel_cutoff_minutes=settings.cancel_cutoff_minutes,
+        move_cutoff_minutes=settings.move_cutoff_minutes,
+        contact_email=settings.contact_email,
+        meeting_link=settings.meeting_link,
     )
 
 
@@ -751,7 +835,24 @@ def build_router(verifier: Callable[[], TokenVerifier | None], backend: Callable
         Returns:
             The updated settings.
         """
-        changes = body.model_dump(exclude_none=True)
+        changes = body.changes()
         return _settings_out(answer(lambda: service().update_settings(who, business, changes)))
+
+    @router.post("/businesses/{business}/bookings/{reference}/cancel", response_model=OwnerBookingOut)
+    def cancel_booking(
+        who: Account, business: Slug, reference: Annotated[str, Path(pattern=r"^[A-Za-z0-9]{10}$")]
+    ) -> OwnerBookingOut:
+        """Cancel a booking on the business's behalf. The customer is emailed.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            reference: Booking reference.
+
+        Returns:
+            The booking after the change.
+        """
+        found, item = answer(lambda: service().cancel_booking(who, business, reference))
+        return _booking_out(found, item)
 
     return router
