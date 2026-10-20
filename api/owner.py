@@ -26,11 +26,14 @@ from api.auth import TokenError, TokenVerifier
 from api.booking import EMAIL_PATTERN, SLUG_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
 from booking.owner import (
+    BUSINESS_TYPES,
     MAX_DAYS_PER_REQUEST,
+    PLANS,
     ConflictError,
     HoursBlock,
     InvalidChangeError,
     Membership,
+    NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
     Settings,
@@ -41,6 +44,18 @@ from postgres import DatabaseUnavailableError
 
 class OwnerBackend(Protocol):
     """What the owner routes need from the booking domain. Tests substitute a fake."""
+
+    def create_business(self, account: str, new: NewBusiness) -> Membership:
+        """See :meth:`booking.owner.OwnerService.create_business`.
+
+        Args:
+            account: The verified account identifier.
+            new: What the owner gave at sign-up.
+
+        Returns:
+            The new membership.
+        """
+        ...
 
     def memberships(self, account: str) -> list[Membership]:
         """See :meth:`booking.owner.OwnerService.memberships`.
@@ -204,11 +219,66 @@ class MembershipOut(BaseModel):
         slug: Public identifier.
         name: Display name.
         role: The account's role.
+        display_name: The owner's name as given at sign-up, or ``None``.
     """
 
     slug: str
     name: str
     role: str
+    display_name: str | None = None
+
+
+class NewBusinessBody(BaseModel):
+    """The sign-up details that create the account's business.
+
+    Attributes:
+        name: Company name, shown to customers.
+        business_type: The kind of business.
+        business_type_other: A short description, required when the type is ``other``.
+        owner_name: The owner's name. Private.
+        plan: The chosen plan. Only ``free`` is available.
+        contact_email: Where booking emails go. Optional.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: Annotated[str, StringConstraints(min_length=1, max_length=120)]
+    business_type: Annotated[str, StringConstraints(pattern="^(" + "|".join(BUSINESS_TYPES) + ")$")]
+    business_type_other: Annotated[str, StringConstraints(max_length=60)] | None = None
+    owner_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    plan: Annotated[str, StringConstraints(pattern="^(" + "|".join(PLANS) + ")$")]
+    contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
+
+    @field_validator("business_type_other", "contact_email")
+    @classmethod
+    def blank_is_none(cls, value: str | None) -> str | None:
+        """Treat a blank optional field as absent.
+
+        Args:
+            value: The submitted value.
+
+        Returns:
+            The value, or ``None`` if blank.
+        """
+        return value or None
+
+    @field_validator("contact_email")
+    @classmethod
+    def check_email(cls, value: str | None) -> str | None:
+        """Accept a plausible address or nothing.
+
+        Args:
+            value: The submitted address.
+
+        Returns:
+            The address, or ``None``.
+
+        Raises:
+            ValueError: If it is not a plausible address.
+        """
+        if value is not None and not EMAIL_PATTERN.match(value):
+            raise ValueError("not an email address")
+        return value
 
 
 class MeOut(BaseModel):
@@ -694,7 +764,28 @@ def build_router(verifier: Callable[[], TokenVerifier | None], backend: Callable
             The memberships.
         """
         found = answer(lambda: service().memberships(who))
-        return MeOut(businesses=[MembershipOut(slug=m.slug, name=m.name, role=m.role) for m in found])
+        return MeOut(
+            businesses=[
+                MembershipOut(slug=m.slug, name=m.name, role=m.role, display_name=m.display_name) for m in found
+            ]
+        )
+
+    @router.post("/businesses", response_model=MembershipOut, status_code=201)
+    def create_business(who: Account, body: NewBusinessBody) -> MembershipOut:
+        """Create the signed-in account's business on the chosen plan.
+
+        Args:
+            who: The verified account.
+            body: The sign-up details.
+
+        Returns:
+            The new membership, with the business's slug.
+        """
+        new = NewBusiness(
+            body.name, body.business_type, body.business_type_other, body.owner_name, body.plan, body.contact_email
+        )
+        made = answer(lambda: service().create_business(who, new))
+        return MembershipOut(slug=made.slug, name=made.name, role=made.role, display_name=made.display_name)
 
     @router.get("/businesses/{business}/bookings", response_model=BookingsOut)
     def bookings(

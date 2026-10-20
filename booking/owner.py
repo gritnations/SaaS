@@ -29,6 +29,43 @@ MAX_BLOCKS = 50
 
 REFERENCE_PATTERN = re.compile(r"^[A-Z0-9]{10}$")
 
+BUSINESS_TYPES = (
+    "barbershop",
+    "car_wash",
+    "clinic",
+    "consulting",
+    "education",
+    "events",
+    "spa",
+    "photographer",
+    "salon",
+    "fitness",
+    "other",
+)
+"""The kinds of business an owner can choose at sign-up. Matches the database check."""
+
+PLANS = ("free",)
+"""Plans that can be chosen today. Paid plans are added once they are decided."""
+
+DEFAULT_HOURS = [(weekday, time(9, 0), time(17, 0)) for weekday in range(1, 6)]
+"""Monday to Friday, 09:00 to 17:00, for a new business."""
+
+DEFAULT_SERVICE = ("intro", "Introductory call", 30, 0)
+"""``(slug, name, minutes, price)`` of the one free service a new business starts with."""
+
+
+def slugify(name: str) -> str:
+    """Turn a company name into a business slug.
+
+    Args:
+        name: The company name.
+
+    Returns:
+        Lower-case letters, digits and single hyphens, 3 to 40 characters. Falls back to ``business``.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40].strip("-")
+    return slug if len(slug) >= 3 else "business"
+
 
 class ConflictError(BookingError):
     """The change would clash with existing data, such as a service identifier already in use."""
@@ -46,11 +83,34 @@ class Membership:
         slug: The business's public identifier.
         name: Display name.
         role: The account's role, currently always ``owner``.
+        display_name: The owner's name as given at sign-up, or ``None``. Private to the dashboard.
     """
 
     slug: str
     name: str
     role: str
+    display_name: str | None = None
+
+
+@dataclass(frozen=True)
+class NewBusiness:
+    """What an owner gives at sign-up to create their business. Shape is validated by the API.
+
+    Attributes:
+        name: Company name, shown to customers.
+        business_type: One of :data:`BUSINESS_TYPES`.
+        business_type_other: A short description when the type is ``other``, else ``None``.
+        owner_name: The owner's name. Private.
+        plan: One of :data:`PLANS`.
+        contact_email: Where booking emails go, or ``None``.
+    """
+
+    name: str
+    business_type: str
+    business_type_other: str | None
+    owner_name: str
+    plan: str
+    contact_email: str | None
 
 
 @dataclass(frozen=True)
@@ -207,11 +267,75 @@ class OwnerService:
         """
         with self._database.connection() as connection:
             rows = connection.execute(
-                "SELECT b.slug, b.name, m.role FROM business_members m JOIN businesses b ON b.id = m.business_id "
+                "SELECT b.slug, b.name, m.role, m.display_name FROM business_members m JOIN businesses b ON b.id = m.business_id "
                 "WHERE m.user_id = %s ORDER BY b.name",
                 (account,),
             ).fetchall()
         return [Membership(*row) for row in rows]
+
+    def create_business(self, account: str, new: NewBusiness) -> Membership:
+        """Create the account's business with sensible defaults, in one transaction.
+
+        The business gets a unique slug from its name, Monday to Friday 09:00 to 17:00, one free 30-minute
+        service, GBP and UK time (the table defaults), and the account as its owner.
+
+        Args:
+            account: The verified account identifier.
+            new: What the owner gave at sign-up.
+
+        Returns:
+            The new membership.
+
+        Raises:
+            ConflictError: If the account already has a business.
+            InvalidChangeError: If the type or plan is not offered, or ``other`` has no description.
+        """
+        if new.business_type not in BUSINESS_TYPES or new.plan not in PLANS:
+            raise InvalidChangeError("That business type or plan is not available.")
+        if (new.business_type == "other") != bool(new.business_type_other):
+            raise InvalidChangeError("Describe the business when its type is other.")
+        base = slugify(new.name)
+        try:
+            with self._database.connection() as connection:
+                if connection.execute("SELECT 1 FROM business_members WHERE user_id = %s", (account,)).fetchone():
+                    raise ConflictError("This account already has a business.")
+                taken = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT slug FROM businesses WHERE slug = %s OR slug LIKE %s", (base, base + "-%")
+                    ).fetchall()
+                }
+                slug = base
+                counter = 2
+                while slug in taken:
+                    suffix = f"-{counter}"
+                    slug = base[: 40 - len(suffix)].rstrip("-") + suffix
+                    counter += 1
+                row: Any = connection.execute(
+                    "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, contact_email) "
+                    "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id::text",
+                    (slug, new.name, new.business_type, new.business_type_other, new.plan, new.contact_email),
+                ).fetchone()
+                business_id = str(row[0])
+                connection.execute(
+                    "INSERT INTO business_members (business_id, user_id, role, display_name) "
+                    "VALUES (%s, %s, 'owner', %s)",
+                    (business_id, account, new.owner_name),
+                )
+                service_slug, service_name, minutes, price = DEFAULT_SERVICE
+                connection.execute(
+                    "INSERT INTO services (business_id, slug, name, duration_minutes, price_minor, sort_order) "
+                    "VALUES (%s, %s, %s, %s, %s, 1)",
+                    (business_id, service_slug, service_name, minutes, price),
+                )
+                for weekday, start, end in DEFAULT_HOURS:
+                    connection.execute(
+                        "INSERT INTO weekly_hours (business_id, weekday, start_time, end_time) VALUES (%s, %s, %s, %s)",
+                        (business_id, weekday, start, end),
+                    )
+        except errors.UniqueViolation:
+            raise ConflictError("This account already has a business.") from None
+        return Membership(slug, new.name, "owner", new.owner_name)
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """List bookings that start within a run of local days, with customer details.
