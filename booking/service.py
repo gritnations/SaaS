@@ -8,8 +8,8 @@ supplies only identifiers, a date, a time and the customer's details.
 
 Paid services:
     * Each business chooses how its customers pay: online through its own payment account, at the venue,
-      or both (:func:`payment_options`). Online needs a paid plan or the trial, a ready payment account and
-      the business's choice. A paid service with no way to pay raises :class:`PaymentUnavailableError`.
+      or both (:func:`payment_options`). Online needs a ready payment account, the business's choice and
+      a plan that includes it (every plan, for now: see :data:`ONLINE_PAYMENTS_NEED_PAID_PLAN`). A paid service with no way to pay raises :class:`PaymentUnavailableError`.
     * A booking paid at the venue is confirmed at once and marked ``at_venue``.
     * A booking paid online starts as a hold (``pending_payment``) that blocks its time for
       :data:`HOLD_MINUTES`, and the customer is sent to a provider-hosted checkout on the business's own
@@ -60,6 +60,10 @@ MANAGE_TOKEN_BYTES = 24
 
 PAID_PLANS = ("starter", "pro")
 """Plans billed monthly. Each includes online card payments."""
+
+ONLINE_PAYMENTS_NEED_PAID_PLAN = False
+"""Whether online card payments need a paid plan or the trial. Off: every plan includes them until plan
+contents are decided. Switching it on restores the plan rule everywhere it is checked."""
 
 TRIAL_DAYS = 14
 """Length of the trial every new business starts with: the paid features, without a card."""
@@ -306,8 +310,11 @@ def online_payments_allowed(plan: str, trial_ends_at: datetime | None, now: date
         now: The current instant.
 
     Returns:
-        ``True`` on a paid plan (also while a renewal is overdue) or during the trial.
+        ``True`` on every plan while :data:`ONLINE_PAYMENTS_NEED_PAID_PLAN` is off. Otherwise ``True`` on a
+        paid plan (also while a renewal is overdue) or during the trial.
     """
+    if not ONLINE_PAYMENTS_NEED_PAID_PLAN:
+        return True
     return plan in PAID_PLANS or (trial_ends_at is not None and trial_ends_at > now)
 
 

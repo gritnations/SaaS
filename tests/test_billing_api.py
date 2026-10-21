@@ -230,3 +230,17 @@ def test_a_subscription_notification_reaches_billing_not_booking_payments() -> N
     assert (response.status_code, response.json()["recorded"]) == (202, True)
     assert [name for name, _ in billing.calls] == ["record"] and payments.calls == []
     assert billing.calls[0][1][0].status == "subscription_active"
+
+
+def test_online_payments_are_on_every_plan_until_the_plan_rule_is_switched_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Off (today): every plan, trial or not. On: only paid plans and a running trial."""
+    from booking.service import online_payments_allowed
+
+    now = TRIAL_END
+    ended = TRIAL_END.replace(year=2025)
+    assert online_payments_allowed("free", None, now) and online_payments_allowed("free", ended, now)
+    monkeypatch.setattr("booking.service.ONLINE_PAYMENTS_NEED_PAID_PLAN", True)
+    assert not online_payments_allowed("free", None, now) and not online_payments_allowed("free", ended, now)
+    assert online_payments_allowed("starter", None, now) and online_payments_allowed(
+        "free", TRIAL_END.replace(year=2027), now
+    )

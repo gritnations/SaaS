@@ -8,7 +8,7 @@ its booking page open; an upgrade checkout is built from server values and only 
 subscription event changes the plan, once; renewal failures, recovery and cancellation move the plan as
 agreed; events for another subscription or an unknown business change nothing; online payments need a paid
 plan or the trial; and each business chooses how its customers pay, with paying at the venue confirmed at
-once and the plan's end switching online payment off.
+once. Online payments work on every plan for now; the plan rule is still tested with its switch on.
 """
 
 import os
@@ -312,10 +312,11 @@ def test_a_new_business_takes_paid_bookings_at_the_venue(world: World) -> None:
         book(world, slug, "11:00", pay="online")
 
 
-def test_online_payments_need_the_trial_or_a_paid_plan(world: World) -> None:
-    """During the trial the owner can connect Stripe and switch online on; after it, both are refused,
-    and an online choice already made stops counting until a paid plan restores it."""
-    account, slug, business_id = sign_up(world)
+def test_online_payments_work_on_every_plan_for_now(world: World) -> None:
+    """With the plan rule off, a free business whose trial has ended can still connect Stripe, switch
+    online payment on and be paid online."""
+    account, slug, _ = sign_up(world)
+    set_business(world, slug, "trial_ends_at = now() - interval '1 minute'")
     world.payments.connect(account, slug)
     assert world.payments.settings(account, slug).enabled is True
     options = world.payments.set_options(account, slug, True, None)
@@ -323,6 +324,18 @@ def test_online_payments_need_the_trial_or_a_paid_plan(world: World) -> None:
     assert world.bookings.list_services(slug)[0].payment_options == ("online", "venue")
     assert book(world, slug, "09:00") == ("pending_payment", "awaiting")
     assert book(world, slug, "11:00", pay="venue") == ("confirmed", "at_venue")
+    assert world.owners.memberships(account)[0].online_payments is True
+
+
+def test_the_plan_rule_still_works_when_switched_on(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the switch on: the trial allows online payments; after it, connecting and switching online on
+    are refused and an online choice stops counting until a paid plan restores it."""
+    monkeypatch.setattr("booking.service.ONLINE_PAYMENTS_NEED_PAID_PLAN", True)
+    account, slug, business_id = sign_up(world)
+    world.payments.connect(account, slug)
+    world.payments.settings(account, slug)
+    world.payments.set_options(account, slug, True, None)
+    assert world.bookings.list_services(slug)[0].payment_options == ("online", "venue")
     set_business(world, slug, "trial_ends_at = now() - interval '1 minute'")
     assert world.bookings.list_services(slug)[0].payment_options == ("venue",)
     assert book(world, slug, "13:00") == ("confirmed", "at_venue")
