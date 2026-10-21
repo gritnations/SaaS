@@ -15,7 +15,8 @@ State transitions of a paid booking:
       payment ``paid``, is logged and is listed to the owner, who refunds it from their provider dashboard.
     * ``pending_payment`` + expired or failed -> ``expired``, releasing the time.
 
-Online payments need a paid plan or the trial (:func:`booking.service.online_payments_allowed`): without
+Online payments need a plan that includes them (:func:`booking.service.online_payments_allowed`; every
+plan, for now). When the plan rule is switched on, without
 one, a business cannot connect a payment account or switch online payment on, and an existing choice stops
 counting until the plan includes it again.
 """
