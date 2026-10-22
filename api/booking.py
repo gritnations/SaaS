@@ -47,6 +47,10 @@ class BusinessOut(BaseModel):
         currency: ISO 4217 code that prices are in.
         time_zone: IANA time zone that dates and times are in.
         payment_options: How paid services can be paid now: ``online``, ``venue``, both, or neither.
+        window_days: How many days ahead, counting today, are open for booking.
+        address: Address for customers, or ``None``.
+        phone: Phone for customers, or ``None``.
+        email: Email for customers, or ``None``. Never the address booking emails are sent to.
     """
 
     slug: str
@@ -54,6 +58,10 @@ class BusinessOut(BaseModel):
     currency: str
     time_zone: str
     payment_options: list[str] = []
+    window_days: int = 14
+    address: str | None = None
+    phone: str | None = None
+    email: str | None = None
 
 
 class ServiceOut(BaseModel):
@@ -309,6 +317,10 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
                 currency=found.currency,
                 time_zone=found.time_zone,
                 payment_options=list(found.payment_options),
+                window_days=found.window_days,
+                address=found.public_address,
+                phone=found.public_phone,
+                email=found.public_email,
             ),
             services=[service_out(s.slug, s.name, s.duration_minutes, s.price_minor) for s in services],
         )

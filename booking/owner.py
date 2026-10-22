@@ -224,6 +224,9 @@ class Settings:
         move_cutoff_minutes: How long before a session a customer may still move it online.
         contact_email: Where the business receives booking emails, or ``None``.
         meeting_link: A link included in customer emails, or ``None``.
+        public_address: Address shown to customers, or ``None``.
+        public_phone: Phone shown to customers, or ``None``.
+        public_email: Email shown to customers, or ``None``.
     """
 
     name: str
@@ -236,6 +239,9 @@ class Settings:
     move_cutoff_minutes: int = 1440
     contact_email: str | None = None
     meeting_link: str | None = None
+    public_address: str | None = None
+    public_phone: str | None = None
+    public_email: str | None = None
 
 
 _BOOKING_COLUMNS = (
@@ -596,7 +602,8 @@ class OwnerService:
             Its settings.
         """
         extra: Any = connection.execute(
-            "SELECT cancel_cutoff_minutes, move_cutoff_minutes, contact_email, meeting_link FROM businesses WHERE id = %s",
+            "SELECT cancel_cutoff_minutes, move_cutoff_minutes, contact_email, meeting_link, public_address, "
+            "public_phone, public_email FROM businesses WHERE id = %s",
             (business.id,),
         ).fetchone()
         return Settings(
@@ -632,8 +639,8 @@ class OwnerService:
             account: The verified account identifier.
             slug: The business's public identifier.
             changes: Fields to change, from ``name``, ``break_minutes``, ``notice_minutes``, ``window_days``,
-                ``cancel_cutoff_minutes``, ``move_cutoff_minutes``, ``contact_email`` and ``meeting_link``
-                (``None`` clears the last two). Values are validated by the API.
+                ``cancel_cutoff_minutes``, ``move_cutoff_minutes``, ``contact_email``, ``meeting_link``,
+                ``public_address``, ``public_phone`` and ``public_email`` (``None`` clears the last five). Values are validated by the API.
 
         Returns:
             The updated settings.
@@ -650,6 +657,9 @@ class OwnerService:
             "move_cutoff_minutes",
             "contact_email",
             "meeting_link",
+            "public_address",
+            "public_phone",
+            "public_email",
         }
         fields = [field for field in changes if field in allowed]
         with self._database.connection() as connection:

@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from api.auth import TokenError, TokenVerifier
-from api.booking import EMAIL_PATTERN, SLUG_PATTERN, Slug
+from api.booking import EMAIL_PATTERN, PHONE_PATTERN, SLUG_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
 from booking.billing import BillingBackend
 from booking.owner import (
@@ -488,6 +488,9 @@ class SettingsOut(BaseModel):
         move_cutoff_minutes: How long before a session a customer may still move it online.
         contact_email: Where the business receives booking emails, or ``None``.
         meeting_link: A link included in customer emails, or ``None``.
+        public_address: Address shown to customers, or ``None``.
+        public_phone: Phone shown to customers, or ``None``.
+        public_email: Email shown to customers, or ``None``.
     """
 
     name: str
@@ -500,6 +503,9 @@ class SettingsOut(BaseModel):
     move_cutoff_minutes: int
     contact_email: str | None
     meeting_link: str | None
+    public_address: str | None = None
+    public_phone: str | None = None
+    public_email: str | None = None
 
 
 class SettingsBody(BaseModel):
@@ -514,6 +520,9 @@ class SettingsBody(BaseModel):
         move_cutoff_minutes: Online moving closes this long before a session, 0 to 43200.
         contact_email: Where booking emails go. An empty string clears it.
         meeting_link: An ``https://`` link for customers. An empty string clears it.
+        public_address: Address shown to customers, 3 to 200 characters. An empty string clears it.
+        public_phone: Phone shown to customers. An empty string clears it.
+        public_email: Email shown to customers. An empty string clears it.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -526,8 +535,47 @@ class SettingsBody(BaseModel):
     move_cutoff_minutes: Annotated[int, Field(ge=0, le=43200)] | None = None
     contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
     meeting_link: Annotated[str, StringConstraints(max_length=500)] | None = None
+    public_address: Annotated[str, StringConstraints(max_length=200)] | None = None
+    public_phone: Annotated[str, StringConstraints(max_length=32)] | None = None
+    public_email: Annotated[str, StringConstraints(max_length=254)] | None = None
 
-    @field_validator("contact_email")
+    @field_validator("public_address")
+    @classmethod
+    def check_address(cls, value: str | None) -> str | None:
+        """Accept an address of at least 3 characters, or an empty string to clear.
+
+        Args:
+            value: The submitted address.
+
+        Returns:
+            The address, or an empty string.
+
+        Raises:
+            ValueError: If it is too short.
+        """
+        if value and len(value) < 3:
+            raise ValueError("address too short")
+        return value
+
+    @field_validator("public_phone")
+    @classmethod
+    def check_phone(cls, value: str | None) -> str | None:
+        """Accept a phone number, or an empty string to clear.
+
+        Args:
+            value: The submitted phone number.
+
+        Returns:
+            The phone number, or an empty string.
+
+        Raises:
+            ValueError: If it is neither.
+        """
+        if value and not PHONE_PATTERN.match(value):
+            raise ValueError("not a phone number")
+        return value
+
+    @field_validator("contact_email", "public_email")
     @classmethod
     def check_email(cls, value: str | None) -> str | None:
         """Accept a plausible address, or an empty string to clear.
@@ -564,7 +612,7 @@ class SettingsBody(BaseModel):
         return value
 
     def changes(self) -> dict[str, object]:
-        """List the fields to change. Sent-but-empty contact email or meeting link means clear.
+        """List the fields to change. A sent-but-empty optional text field means clear.
 
         Returns:
             Field name to new value.
@@ -572,7 +620,7 @@ class SettingsBody(BaseModel):
         sent = self.model_dump(exclude_unset=True)
         out: dict[str, object] = {}
         for name, value in sent.items():
-            if name in ("contact_email", "meeting_link"):
+            if name in ("contact_email", "meeting_link", "public_address", "public_phone", "public_email"):
                 out[name] = value or None
             elif value is not None:
                 out[name] = value
@@ -678,6 +726,9 @@ def _settings_out(settings: Settings) -> SettingsOut:
         move_cutoff_minutes=settings.move_cutoff_minutes,
         contact_email=settings.contact_email,
         meeting_link=settings.meeting_link,
+        public_address=settings.public_address,
+        public_phone=settings.public_phone,
+        public_email=settings.public_email,
     )
 
 

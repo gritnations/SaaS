@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from booking.links import CustomerLinks, as_links
 from mail import Attachment, Mailer, MailError, Message
 from postgres import Database, DatabaseUnavailableError
 
@@ -326,11 +327,12 @@ def owner_message(context: Context) -> Message | None:
     )
 
 
-def site_url_from_environment(environ: Mapping[str, str]) -> str | None:
-    """Read the public site URL that manage links point to.
+def site_url_from_environment(environ: Mapping[str, str], name: str = SITE_URL_ENV) -> str | None:
+    """Read a public site URL, by default the one manage links point to.
 
     Args:
         environ: The mapping to read.
+        name: The variable to read.
 
     Returns:
         The URL without a trailing slash, or ``None`` when absent.
@@ -338,11 +340,11 @@ def site_url_from_environment(environ: Mapping[str, str]) -> str | None:
     Raises:
         NotifyConfigError: If set but not an ``https://`` URL (``http://localhost`` is allowed for development).
     """
-    raw = environ.get(SITE_URL_ENV, "").strip().rstrip("/")
+    raw = environ.get(name, "").strip().rstrip("/")
     if not raw:
         return None
     if not _SITE_PATTERN.match(raw):
-        raise NotifyConfigError(f"{SITE_URL_ENV} must be an https:// URL such as https://book.example.com.")
+        raise NotifyConfigError(f"{name} must be an https:// URL such as https://book.example.com.")
     return raw
 
 
@@ -359,19 +361,24 @@ class Notifier:
     """Sends booking emails and records each attempt. Never raises."""
 
     def __init__(
-        self, database: Database, mailer: Mailer | None, site_url: str | None, sender_domain: str = "example.com"
+        self,
+        database: Database,
+        mailer: Mailer | None,
+        site_url: str | CustomerLinks | None,
+        sender_domain: str = "example.com",
     ) -> None:
         """Create the notifier. Performs no I/O.
 
         Args:
             database: The database boundary.
             mailer: The email provider, or ``None`` to record every email as skipped.
-            site_url: Where manage links point, or ``None`` to leave links out.
+            site_url: Where manage links point: a site URL (staging page layout) or customer links. ``None``
+                leaves links out.
             sender_domain: Domain for calendar event identifiers, normally the sending domain.
         """
         self._database = database
         self._mailer = mailer
-        self._site_url = site_url
+        self._links = as_links(site_url)
         self._sender_domain = sender_domain
 
     def _context(self, kind: str, booking_id: str, token: str | None) -> tuple[str, Context] | None:
@@ -389,7 +396,7 @@ class Notifier:
             row: Any = connection.execute(_CONTEXT_QUERY, (booking_id,)).fetchone()
         if row is None:
             return None
-        link = manage_url(self._site_url, row[2], row[6], token) if self._site_url and token else None
+        link = self._links.manage(row[2], row[6], token) if self._links and token else None
         context = Context(
             kind=kind,
             business_name=row[1],

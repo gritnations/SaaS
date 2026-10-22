@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Book online</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <script type="module" src="/assets/book.js"></script>
+  </head>
+  <body>
+    <header class="top">
+      <div class="badge" id="badge" aria-hidden="true"></div>
+      <div>
+        <h1 id="business-name">Loading…</h1>
+        <div class="sub" id="business-sub">Book online</div>
+      </div>
+    </header>
+    <main class="page two-col" id="page">
+      <div id="flow">
+        <p class="loading" role="status">Loading the booking page…</p>
+      </div>
+      <aside id="aside" aria-label="Your booking"></aside>
+    </main>
+    <footer class="foot">
+      Booking by <strong>GRIT<span>NATIONS</span></strong>
+    </footer>
+  </body>
+</html>

@@ -6,6 +6,7 @@ database. Database behaviour, including the overlap constraint, is covered by
 ``test_booking_postgres.py``.
 """
 
+from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -57,13 +58,15 @@ class FakeBookings:
         received: The booking requests passed to :meth:`create_booking`.
     """
 
-    def __init__(self, fail_with: Exception | None = None) -> None:
+    def __init__(self, fail_with: Exception | None = None, business: Business = BUSINESS) -> None:
         """Create the fake.
 
         Args:
             fail_with: An exception for every call to raise.
+            business: The business to answer with.
         """
         self.fail_with = fail_with
+        self.business = business
         self.received: list[BookingRequest] = []
 
     def _check(self) -> None:
@@ -85,7 +88,7 @@ class FakeBookings:
             The fixed business and its one service.
         """
         self._check()
-        return BUSINESS, [INTRO]
+        return self.business, [INTRO]
 
     def availability(
         self, business_slug: str, service_slug: str, start: date, days: int
@@ -144,11 +147,30 @@ def test_services_lists_public_fields_only() -> None:
         "currency": "GBP",
         "time_zone": "Europe/London",
         "payment_options": [],
+        "window_days": 30,
+        "address": None,
+        "phone": None,
+        "email": None,
     }
     assert body["services"] == [
         {"slug": "intro", "name": "Introductory call", "duration_minutes": 30, "price_minor": 0, "free": True}
     ]
     assert "internal" not in response.text
+
+
+def test_services_show_public_contact_details() -> None:
+    """The business's public address, phone and email reach customers when set."""
+    business = replace(
+        BUSINESS, public_address="1 High Street, London", public_phone="020 7946 0000", public_email="hello@example.com"
+    )
+    response = client_for(FakeBookings(business=business)).get("/businesses/example/services")
+    assert response.status_code == 200
+    shown = response.json()["business"]
+    assert (shown["address"], shown["phone"], shown["email"]) == (
+        "1 High Street, London",
+        "020 7946 0000",
+        "hello@example.com",
+    )
 
 
 def test_availability_returns_days_and_slots() -> None:
