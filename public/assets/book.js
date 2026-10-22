@@ -274,7 +274,7 @@ function timeSection() {
     el(
       "p",
       { class: "small muted" },
-      `Times are ${state.business.time_zone.replace("_", " ")} time. Crossed-out times are taken.`,
+      `Times are ${state.business.time_zone.replaceAll("_", " ")} time. Crossed-out times are taken.`,
     ),
     grid,
   );

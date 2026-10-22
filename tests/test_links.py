@@ -2,7 +2,7 @@
 
 import pytest
 
-from api.main import create_api
+from api.main import ApiConfigError, create_api
 from booking.links import CustomerLinks, as_links
 from booking.notify import NotifyConfigError, site_url_from_environment
 
@@ -41,6 +41,20 @@ def test_pages_url_is_validated_like_the_site_url() -> None:
 
 
 def test_api_builds_without_a_database_when_pages_url_is_set() -> None:
-    """Setting the pages URL alone does not need a database or change start-up."""
-    api = create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com"})
+    """Setting the pages URL with the site URL does not need a database or change start-up."""
+    api = create_api(
+        {
+            "APP_ENV": "test",
+            "BOOKING_PAGES_URL": "https://pages.example.com",
+            "PUBLIC_SITE_URL": "https://site.example.com",
+        }
+    )
     assert api.title
+
+
+def test_pages_url_without_site_url_is_refused() -> None:
+    """Payment notifications are recorded only with the site URL, so the pages URL alone is refused."""
+    with pytest.raises(ApiConfigError, match="BOOKING_PAGES_URL needs PUBLIC_SITE_URL"):
+        create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com"})
+    with pytest.raises(ApiConfigError):
+        create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com", "PUBLIC_SITE_URL": " "})
