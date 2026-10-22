@@ -102,6 +102,7 @@ class Membership:
         plan_status: ``active``, or ``past_due`` when a renewal failed.
         trial_ends_at: When the business's trial ends, or ``None``.
         online_payments: The plan, or the trial, includes online payments now.
+        plan_ends_at: When a cancelled paid plan ends, or ``None``.
     """
 
     slug: str
@@ -112,6 +113,7 @@ class Membership:
     plan_status: str = "active"
     trial_ends_at: datetime | None = None
     online_payments: bool = False
+    plan_ends_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -292,14 +294,15 @@ class OwnerService:
         """
         with self._database.connection() as connection:
             rows = connection.execute(
-                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status, b.trial_ends_at "
+                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status, b.trial_ends_at, b.plan_ends_at "
                 "FROM business_members m JOIN businesses b ON b.id = m.business_id "
                 "WHERE m.user_id = %s ORDER BY b.name",
                 (account,),
             ).fetchall()
         now = datetime.now(UTC)
         return [
-            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now)) for r in rows
+            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now), r[7])
+            for r in rows
         ]
 
     def create_business(self, account: str, new: NewBusiness) -> Membership:

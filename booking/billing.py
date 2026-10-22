@@ -12,6 +12,7 @@ State transitions of a business's plan:
     * free (trial or not) + subscription active -> the plan the subscription was started for, ``active``.
     * ``active`` + renewal failed -> ``past_due``; ``past_due`` + paid again -> ``active``.
     * any paid plan + subscription ended -> the free plan, ``active``. Online payments then stop counting.
+    * a subscription set to cancel later keeps its plan; ``plan_ends_at`` records when it will end.
 """
 
 import logging
@@ -226,14 +227,16 @@ class BillingService:
             return False
         with self._database.connection() as connection:
             row = connection.execute(
-                "SELECT slug, plan, plan_status, billing_subscription_id FROM businesses WHERE id = %s FOR UPDATE",
+                "SELECT slug, plan, plan_status, billing_subscription_id, plan_ends_at FROM businesses "
+                "WHERE id = %s FOR UPDATE",
                 (business_id,),
             ).fetchone()
             if row is None:
                 LOGGER.warning("subscription event for an unknown business provider=%s", event.provider)
                 return False
-            slug, plan, status, subscription = row
+            slug, plan, status, subscription, ends_at = row
             same = subscription == event.subscription_id
+            new_ends = event.ends_at if event.ends_known else ends_at
             if event.status == "subscription_active":
                 if event.plan not in PLAN_PRICES:
                     LOGGER.error("subscription event names no paid plan business=%s", slug)
@@ -241,23 +244,32 @@ class BillingService:
                 if not same and subscription is not None:
                     LOGGER.error("second subscription for a business already on a plan business=%s", slug)
                     return False
-                if same and status == "active" and plan == event.plan:
+                if same and status == "active" and plan == event.plan and new_ends == ends_at:
                     return False
                 connection.execute(
                     "UPDATE businesses SET plan = %s, plan_status = 'active', billing_subscription_id = %s, "
-                    "billing_customer_id = COALESCE(%s, billing_customer_id) WHERE id = %s",
-                    (event.plan, event.subscription_id, event.customer_id, business_id),
+                    "billing_customer_id = COALESCE(%s, billing_customer_id), plan_ends_at = %s WHERE id = %s",
+                    (
+                        event.plan,
+                        event.subscription_id,
+                        event.customer_id,
+                        new_ends if same else event.ends_at,
+                        business_id,
+                    ),
                 )
             elif not same:
                 return False
             elif event.status == "subscription_past_due":
-                if status == "past_due":
+                if status == "past_due" and new_ends == ends_at:
                     return False
-                connection.execute("UPDATE businesses SET plan_status = 'past_due' WHERE id = %s", (business_id,))
+                connection.execute(
+                    "UPDATE businesses SET plan_status = 'past_due', plan_ends_at = %s WHERE id = %s",
+                    (new_ends, business_id),
+                )
             else:
                 connection.execute(
-                    "UPDATE businesses SET plan = 'free', plan_status = 'active', billing_subscription_id = NULL "
-                    "WHERE id = %s",
+                    "UPDATE businesses SET plan = 'free', plan_status = 'active', billing_subscription_id = NULL, "
+                    "plan_ends_at = NULL WHERE id = %s",
                     (business_id,),
                 )
         LOGGER.info("plan %s business=%s", event.status, slug)
