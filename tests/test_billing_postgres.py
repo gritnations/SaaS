@@ -15,7 +15,7 @@ import os
 import secrets
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -361,3 +361,25 @@ def test_payment_options_must_leave_a_way_to_pay_and_need_a_ready_account(world:
     assert world.bookings.list_services(slug)[0].payment_options == ("online",)
     with pytest.raises(PaymentUnavailableError):
         book(world, slug, "09:00", pay="venue")
+
+
+def test_a_cancelled_plan_keeps_its_plan_and_reports_when_it_ends(world: World) -> None:
+    """Cancelling at period end keeps the plan and records the date; undoing it clears the date; the end
+    returns the business to Free and clears it too. A checkout event never touches the date."""
+    account, slug, business_id = sign_up(world)
+    world.billing.record(event(business_id, "subscription_active"))
+    ends = datetime(2026, 11, 20, tzinfo=UTC)
+    cancelling = replace(event(business_id, "subscription_active"), ends_at=ends, ends_known=True)
+    assert world.billing.record(cancelling) is True
+    [membership] = world.owners.memberships(account)
+    assert (membership.plan, membership.plan_status, membership.plan_ends_at) == ("starter", "active", ends)
+    assert world.billing.record(cancelling) is False
+    assert world.billing.record(event(business_id, "subscription_active")) is False
+    assert world.owners.memberships(account)[0].plan_ends_at == ends
+    undone = replace(event(business_id, "subscription_active"), ends_at=None, ends_known=True)
+    assert world.billing.record(undone) is True
+    assert world.owners.memberships(account)[0].plan_ends_at is None
+    world.billing.record(cancelling)
+    world.billing.record(event(business_id, "subscription_ended"))
+    [membership] = world.owners.memberships(account)
+    assert (membership.plan, membership.plan_ends_at) == ("free", None)

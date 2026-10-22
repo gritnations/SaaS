@@ -25,6 +25,7 @@ never leave the server. Only test-mode keys are accepted until live payments are
 
 import logging
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 import stripe
@@ -426,6 +427,8 @@ class StripeProvider:
         raw_marks = item.get("metadata")
         marks: dict[str, Any] = raw_marks if isinstance(raw_marks, dict) else {}
         status = "ignored"
+        ends_at: datetime | None = None
+        ends_known = False
         if event.type == "checkout.session.completed" and item.get("mode") == "subscription":
             if item.get("payment_status") in ("paid", "no_payment_required"):
                 status = "subscription_active"
@@ -435,6 +438,7 @@ class StripeProvider:
             status = _SUBSCRIPTION_STATUS.get(str(item.get("status")), "ignored")
             subscription, customer = item.get("id"), item.get("customer")
             reference = _text(marks.get("business_id")) or ""
+            ends_at, ends_known = self._subscription_end(item), True
         elif event.type == "customer.subscription.deleted":
             status = "subscription_ended"
             subscription, customer = item.get("id"), item.get("customer")
@@ -450,7 +454,28 @@ class StripeProvider:
             or (_text(subscription.get("id")) if isinstance(subscription, dict) else None),
             customer_id=_text(customer) or (_text(customer.get("id")) if isinstance(customer, dict) else None),
             plan=_text(marks.get("plan")),
+            ends_at=ends_at,
+            ends_known=ends_known,
         )
+
+    @staticmethod
+    def _subscription_end(item: dict[str, Any]) -> datetime | None:
+        """Read when a cancelled subscription will end.
+
+        Args:
+            item: The subscription object.
+
+        Returns:
+            ``cancel_at``, or the current period's end when it is set to cancel at period end, or ``None``.
+        """
+        moment = item.get("cancel_at")
+        if not isinstance(moment, int) and item.get("cancel_at_period_end"):
+            raw_items = item.get("items")
+            items: dict[str, Any] = raw_items if isinstance(raw_items, dict) else {}
+            data = items.get("data")
+            first = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else {}
+            moment = item.get("current_period_end") or first.get("current_period_end")
+        return datetime.fromtimestamp(moment, UTC) if isinstance(moment, int) else None
 
     @staticmethod
     def _unavailable(action: str, exc: stripe.StripeError) -> ProviderUnavailableError:

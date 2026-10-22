@@ -10,6 +10,7 @@ They do not establish that Stripe accepts these requests: that is checked by han
 
 import json
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -310,3 +311,33 @@ def test_each_secret_is_trusted_only_for_its_own_kind_of_notification() -> None:
 
     with pytest.raises(WebhookRejectedError):
         billing_provider(billing=None).parse_webhook(sign(platform, BILLING_SECRET), platform)
+
+
+def test_a_subscription_set_to_cancel_reports_when_it_ends() -> None:
+    """cancel_at, or the period end when cancelling at period end, becomes ends_at; a plain update has none."""
+    base = {
+        "object": "subscription",
+        "id": "sub_test_1",
+        "customer": "cus_test_1",
+        "status": "active",
+        "metadata": MARKS,
+    }
+    cases: list[tuple[dict[str, Any], datetime | None]] = [
+        ({**base, "cancel_at": 1795132800}, datetime(2026, 11, 20, 0, 0, tzinfo=UTC)),
+        (
+            {
+                **base,
+                "cancel_at": None,
+                "cancel_at_period_end": True,
+                "items": {"data": [{"current_period_end": 1795132800}]},
+            },
+            datetime(2026, 11, 20, 0, 0, tzinfo=UTC),
+        ),
+        ({**base, "cancel_at": None, "cancel_at_period_end": False}, None),
+    ]
+    for item, expected in cases:
+        body = platform_event("customer.subscription.updated", item)
+        parsed = billing_provider().parse_webhook(sign(body, BILLING_SECRET), body)
+        assert (parsed.status, parsed.ends_at, parsed.ends_known) == ("subscription_active", expected, True)
+    body = platform_event("checkout.session.completed", SUBSCRIBED)
+    assert billing_provider().parse_webhook(sign(body, BILLING_SECRET), body).ends_known is False

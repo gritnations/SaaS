@@ -348,6 +348,7 @@ def test_me_lists_the_accounts_businesses() -> None:
                 "plan_status": "active",
                 "trial_ends_at": None,
                 "online_payments": False,
+                "plan_ends_at": None,
             }
         ]
     }

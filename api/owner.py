@@ -227,6 +227,7 @@ class MembershipOut(BaseModel):
         plan_status: ``active``, or ``past_due`` when a renewal failed.
         trial_ends_at: When the trial ends, ISO 8601, or ``None``.
         online_payments: The plan, or the trial, includes online payments now.
+        plan_ends_at: When a cancelled paid plan ends, ISO 8601, or ``None``.
     """
 
     slug: str
@@ -237,6 +238,7 @@ class MembershipOut(BaseModel):
     plan_status: str = "active"
     trial_ends_at: str | None = None
     online_payments: bool = False
+    plan_ends_at: str | None = None
 
 
 class NewBusinessBody(BaseModel):
@@ -787,6 +789,7 @@ def _membership_out(found: Membership) -> MembershipOut:
         plan_status=found.plan_status,
         trial_ends_at=found.trial_ends_at.isoformat() if found.trial_ends_at else None,
         online_payments=found.online_payments,
+        plan_ends_at=found.plan_ends_at.isoformat() if found.plan_ends_at else None,
     )
 
 

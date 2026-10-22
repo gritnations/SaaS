@@ -93,6 +93,9 @@ class PaymentEvent:
         subscription_id: The provider's subscription identifier, for a subscription event.
         customer_id: The provider's customer identifier, for a subscription event.
         plan: The plan the subscription is for, as recorded when it was started.
+        ends_at: When a cancelled subscription will end, or ``None`` when it is not set to end. Only events
+            about the subscription itself carry it; ``ends_known`` says whether this one does.
+        ends_known: Whether the event reports the subscription's end date (``ends_at`` may still be ``None``).
     """
 
     provider: str
@@ -107,6 +110,8 @@ class PaymentEvent:
     subscription_id: str | None = None
     customer_id: str | None = None
     plan: str | None = None
+    ends_at: datetime | None = None
+    ends_known: bool = False
 
 
 @dataclass(frozen=True)
