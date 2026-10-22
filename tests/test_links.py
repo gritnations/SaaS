@@ -56,5 +56,6 @@ def test_pages_url_without_site_url_is_refused() -> None:
     """Payment notifications are recorded only with the site URL, so the pages URL alone is refused."""
     with pytest.raises(ApiConfigError, match="BOOKING_PAGES_URL needs PUBLIC_SITE_URL"):
         create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com"})
-    with pytest.raises(ApiConfigError):
-        create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com", "PUBLIC_SITE_URL": " "})
+    for blank in (" ", "/", " / "):
+        with pytest.raises(ApiConfigError):
+            create_api({"APP_ENV": "test", "BOOKING_PAGES_URL": "https://pages.example.com", "PUBLIC_SITE_URL": blank})

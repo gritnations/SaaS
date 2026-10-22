@@ -269,6 +269,8 @@ def create_api(
         ApiConfigError: If ``APP_ENV`` or ``METRICS_TOKEN`` is invalid, or ``BOOKING_PAGES_URL`` is set without
             ``PUBLIC_SITE_URL``: payment notifications are recorded only when ``PUBLIC_SITE_URL`` is set, so
             customers could otherwise pay for bookings that are never confirmed.
+        booking.notify.NotifyConfigError: If ``BOOKING_PAGES_URL`` is set and ``PUBLIC_SITE_URL`` is not an
+            ``https://`` URL.
         api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
         mail.MailConfigError: If ``RESEND_API_KEY`` is set without a valid ``EMAIL_FROM``.
         booking.notify.NotifyConfigError: If ``PUBLIC_SITE_URL`` is set but invalid.
@@ -277,7 +279,7 @@ def create_api(
     env = os.environ if environ is None else environ
     environment = resolve_environment(env)
     metrics_token = resolve_metrics_token(env)
-    if env.get(PAGES_URL_ENV, "").strip() and not env.get(SITE_URL_ENV, "").strip():
+    if env.get(PAGES_URL_ENV, "").strip() and site_url_from_environment(env) is None:
         raise ApiConfigError(f"{PAGES_URL_ENV} needs {SITE_URL_ENV} to be set as well.")
     stripe_provider = stripe_from_environment(env)
     registry = build_registry(environment, [stripe_provider] if stripe_provider is not None else None)
