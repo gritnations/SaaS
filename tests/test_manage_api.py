@@ -259,3 +259,29 @@ def test_settings_answer_includes_the_new_fields() -> None:
     """The settings response lists the deadlines, contact email and meeting link."""
     body = client_for(owners=FakeOwners()).get("/owner/businesses/example/settings", headers=GOOD).json()
     assert {"cancel_cutoff_minutes", "move_cutoff_minutes", "contact_email", "meeting_link"} <= set(body)
+
+
+def test_public_contact_details_are_validated_and_empty_values_clear() -> None:
+    """The public address, phone and email are checked, and empty strings clear them."""
+    owners = FakeOwners()
+    client = client_for(owners=owners)
+    ok = client.patch(
+        "/owner/businesses/example/settings",
+        headers=GOOD,
+        json={"public_address": "1 High Street, London", "public_phone": "020 7946 0000", "public_email": ""},
+    )
+    assert ok.status_code == 200
+    assert owners.calls[-1][1][2] == {
+        "public_address": "1 High Street, London",
+        "public_phone": "020 7946 0000",
+        "public_email": None,
+    }
+    for bad in (
+        {"public_address": "ab"},
+        {"public_address": "x" * 201},
+        {"public_phone": "call me"},
+        {"public_email": "not-an-email"},
+    ):
+        assert client.patch("/owner/businesses/example/settings", headers=GOOD, json=bad).status_code == 422
+    body = client.get("/owner/businesses/example/settings", headers=GOOD).json()
+    assert {"public_address", "public_phone", "public_email"} <= set(body)

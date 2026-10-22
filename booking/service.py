@@ -42,6 +42,7 @@ from booking.availability import (
     time_to_minutes,
     weekday_index,
 )
+from booking.links import CustomerLinks, as_links
 from payments.base import AccountPayments, CheckoutOrder, ProviderUnavailableError
 from postgres import Database
 
@@ -116,6 +117,9 @@ class Business:
         pay_online: The business offers online payment.
         pay_at_venue: The business offers payment at the venue.
         payment_options: How paid services can be paid now, filled in by :meth:`BookingService.list_services`.
+        public_address: Address shown to customers, or ``None``.
+        public_phone: Phone shown to customers, or ``None``.
+        public_email: Email shown to customers, or ``None``.
     """
 
     id: str
@@ -133,6 +137,9 @@ class Business:
     pay_online: bool = False
     pay_at_venue: bool = True
     payment_options: tuple[str, ...] = ()
+    public_address: str | None = None
+    public_phone: str | None = None
+    public_email: str | None = None
 
     @property
     def zone(self) -> ZoneInfo:
@@ -350,7 +357,7 @@ class BookingService:
         clock: Callable[[], datetime] | None = None,
         notifier: BookingNotifier | None = None,
         payments: AccountPayments | None = None,
-        site_url: str | None = None,
+        site_url: str | CustomerLinks | None = None,
     ) -> None:
         """Create the service. Performs no I/O.
 
@@ -359,13 +366,14 @@ class BookingService:
             clock: Returns the current aware instant. ``None`` means the system clock in UTC.
             notifier: Sends booking emails after a change is committed. ``None`` sends nothing.
             payments: The payment provider for paid services. ``None`` means paid services cannot be booked.
-            site_url: The public site that checkouts return to. ``None`` means paid services cannot be booked.
+            site_url: Where checkouts return to: a site URL (staging page layout) or customer links. ``None``
+                means paid services cannot be booked.
         """
         self._database = database
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
         self._notifier = notifier
         self._payments = payments
-        self._site_url = site_url
+        self._links = as_links(site_url)
 
     @staticmethod
     def _business(connection: psycopg.Connection[Any], slug: str) -> Business:
@@ -383,7 +391,8 @@ class BookingService:
         """
         row = connection.execute(
             "SELECT id::text, slug, name, time_zone, currency, break_minutes, notice_minutes, window_days, "
-            "payment_account_id, payments_enabled, plan, trial_ends_at, pay_online, pay_at_venue "
+            "payment_account_id, payments_enabled, plan, trial_ends_at, pay_online, pay_at_venue, "
+            "public_address, public_phone, public_email "
             "FROM businesses WHERE slug = %s",
             (slug,),
         ).fetchone()
@@ -655,7 +664,7 @@ class BookingService:
             business.pay_online
             and online_payments_allowed(business.plan, business.trial_ends_at, self._clock())
             and self._payments is not None
-            and self._site_url is not None
+            and self._links is not None
             and business.payments_enabled
             and business.payment_account_id is not None
         )
@@ -716,9 +725,9 @@ class BookingService:
         Raises:
             PaymentUnavailableError: If the checkout could not be created. The hold is released.
         """
-        if self._payments is None or self._site_url is None or business.payment_account_id is None:
+        if self._payments is None or self._links is None or business.payment_account_id is None:
             raise PaymentUnavailableError("Online payment is not available for this business yet.")
-        back = f"{self._site_url}/?b={business.slug}"
+        back = self._links.booking(business.slug)
         order = CheckoutOrder(
             reference=reference,
             amount_minor=service.price_minor,

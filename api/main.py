@@ -20,6 +20,8 @@ Environment variables read:
     * ``DATABASE_URL`` and ``DATABASE_POOL_MAX_SIZE``: read by ``postgres``.
     * ``SUPABASE_URL``: read by ``api.auth`` to verify owner sign-in tokens.
     * ``RESEND_API_KEY`` and ``EMAIL_FROM``: read by ``mail``. ``PUBLIC_SITE_URL``: read by ``booking.notify``.
+    * ``BOOKING_PAGES_URL``: optional. Where the product pages are served; when set, customer manage links
+      and checkout returns point there instead of ``PUBLIC_SITE_URL``.
     * ``STRIPE_SECRET_KEY`` and ``STRIPE_WEBHOOK_SECRET``: read by ``payments.stripe``. Secrets. Paid
       services can be booked only when both and ``PUBLIC_SITE_URL`` are set.
     * ``STRIPE_BILLING_WEBHOOK_SECRET``: read by ``payments.stripe``. A secret. Paid plans can be chosen only
@@ -47,6 +49,7 @@ from api.auth import TokenVerifier, verifier_from_environment
 from api.booking import build_router
 from api.metrics import Metrics
 from booking.billing import BillingBackend, BillingService
+from booking.links import PAGES_URL_ENV, CustomerLinks
 from booking.manage import ManageService
 from booking.notify import Notifier, site_url_from_environment
 from booking.owner import OwnerService
@@ -288,9 +291,11 @@ def create_api(
     api.state.environment = environment
     if isinstance(probe, Database):
         site_url = site_url_from_environment(env)
-        notifier = Notifier(probe, mailer_from_environment(env), site_url, sender_domain(env))
+        pages_url = site_url_from_environment(env, PAGES_URL_ENV)
+        links = CustomerLinks(pages_url, pages=True) if pages_url else site_url
+        notifier = Notifier(probe, mailer_from_environment(env), links, sender_domain(env))
         if bookings is None:
-            bookings = BookingService(probe, notifier=notifier, payments=stripe_provider, site_url=site_url)
+            bookings = BookingService(probe, notifier=notifier, payments=stripe_provider, site_url=links)
         if payments is None and stripe_provider is not None and site_url is not None:
             payments = PaymentService(probe, stripe_provider, site_url, notifier=notifier)
         if billing is None and stripe_provider is not None and stripe_provider.bills_plans and site_url is not None:

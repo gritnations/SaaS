@@ -2,4 +2,14 @@
 // The inherited engine under schedule-booking/ has never been linted and is deliberately excluded.
 import js from "@eslint/js";
 
-export default [{ ignores: ["schedule-booking/**", "node_modules/**", ".venv/**"] }, js.configs.recommended];
+const browser = Object.fromEntries(
+  ["window", "document", "location", "history", "fetch", "URL", "URLSearchParams", "Blob", "Intl", "setTimeout"].map(
+    (name) => [name, "readonly"],
+  ),
+);
+
+export default [
+  { ignores: ["schedule-booking/**", "node_modules/**", ".venv/**"] },
+  js.configs.recommended,
+  { files: ["public/**/*.js"], languageOptions: { sourceType: "module", globals: browser } },
+];
