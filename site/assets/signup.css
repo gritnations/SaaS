@@ -1,0 +1,230 @@
+/* Sign-up page. Uses the tokens, fields and buttons from /assets/gn.css and motion from landing-motion.css. */
+
+body.signup {
+  background-color: #070f1a;
+  background-image:
+    radial-gradient(ellipse 110% 420px at 50% -140px, rgba(19, 53, 90, 1), transparent),
+    radial-gradient(ellipse 70% 300px at 100% 0, rgba(56, 86, 66, 0.35), transparent),
+    radial-gradient(ellipse 60% 260px at 0 40px, rgba(224, 170, 85, 0.08), transparent);
+}
+
+.signup-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 16px 20px;
+}
+
+.signup-top .brand {
+  flex: 1 1 auto;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.signup-top .brand span {
+  color: var(--amber);
+}
+
+.signin-link {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.signup-main {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+}
+
+.signup-main section {
+  display: grid;
+  gap: 16px;
+}
+
+.pill {
+  position: relative;
+  overflow: hidden;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 100px;
+  border: 1px solid var(--line-strong);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pill .ln-shimmer {
+  position: absolute;
+  inset: 0;
+}
+
+.pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.signup-main h1 {
+  margin: 0;
+  font-size: clamp(32px, 7vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+}
+
+.lead {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.beam-card {
+  position: relative;
+  border-radius: 18px;
+  padding: 1px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+}
+
+.beam-inner {
+  position: relative;
+  border-radius: 17px;
+  background: linear-gradient(180deg, #0f2136, #0b1828);
+  padding: 22px 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.field select {
+  min-height: 48px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: #0b1828;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.field select:focus {
+  outline: none;
+  border-color: var(--mint);
+  box-shadow: 0 0 0 3px rgba(237, 251, 237, 0.25);
+}
+
+.field select[aria-invalid="true"] {
+  border-color: var(--amber);
+}
+
+.pw-wrap {
+  position: relative;
+  display: block;
+}
+
+.pw-wrap input {
+  width: 100%;
+  padding-right: 72px;
+}
+
+.pw-toggle {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.strength {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.strength i {
+  height: 3px;
+  border-radius: 100px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.strength[data-level="1"] i:nth-child(-n + 1),
+.strength[data-level="2"] i:nth-child(-n + 2),
+.strength[data-level="3"] i {
+  background: var(--mint);
+}
+
+.hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.check input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  flex: 0 0 auto;
+  accent-color: var(--mint);
+}
+
+.center {
+  text-align: center;
+}
+
+.white {
+  color: #ffffff;
+}
+
+.mail-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  border: 1px solid rgba(237, 251, 237, 0.4);
+  background: linear-gradient(135deg, var(--navy), var(--green));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#done-view .chip-btn {
+  justify-self: center;
+}
+
+.forgot {
+  justify-self: center;
+  margin-top: 6px;
+}
+
+.beam-inner .btn + .btn {
+  margin-top: 6px;
+}

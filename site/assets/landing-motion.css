@@ -1,0 +1,643 @@
+/* Landing page motion, from the approved prototype. All of it stops for prefers-reduced-motion. */
+.ln-grad {
+  background: linear-gradient(180deg, #ffffff 30%, rgba(255, 255, 255, 0.62));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ln-accent {
+  background: linear-gradient(90deg, #edfbed, #e0aa55);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gn-cta {
+  transition: all 0.25s ease;
+}
+.gn-cta:hover {
+  background: #b82424;
+  box-shadow:
+    0 0 0 1px rgba(214, 44, 45, 0.6),
+    0 8px 28px rgba(214, 44, 45, 0.35);
+  transform: translateY(-1px);
+}
+.gn-opt {
+  transition: all 0.2s ease;
+}
+.gn-opt:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.04);
+}
+.gn-cta:focus-visible,
+.gn-opt:focus-visible {
+  outline: 3px solid #e0aa55;
+  outline-offset: 2px;
+}
+.ln-card {
+  transition:
+    border-color 0.3s ease,
+    transform 0.3s ease;
+}
+.ln-card:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-2px);
+}
+
+@keyframes ln-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.ln-in {
+  opacity: 0;
+  animation: ln-up 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+.d1 {
+  animation-delay: 0.05s;
+}
+.d2 {
+  animation-delay: 0.18s;
+}
+.d3 {
+  animation-delay: 0.3s;
+}
+.d4 {
+  animation-delay: 0.42s;
+}
+.d5 {
+  animation-delay: 0.6s;
+}
+
+@keyframes ln-tilt {
+  from {
+    opacity: 0;
+    transform: perspective(1600px) rotateX(24deg) translateY(40px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: perspective(1600px) rotateX(5deg) translateY(0) scale(1);
+  }
+}
+.ln-tilt {
+  opacity: 0;
+  animation: ln-tilt 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) 0.55s forwards;
+  transform-origin: 50% 0;
+}
+
+@keyframes ln-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.ln-beam {
+  position: absolute;
+  inset: -60%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 70%,
+    rgba(237, 251, 237, 0.9) 80%,
+    rgba(224, 170, 85, 0.9) 86%,
+    transparent 92%
+  );
+  animation: ln-spin 7s linear infinite;
+}
+
+@keyframes ln-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+.ln-marquee {
+  display: flex;
+  gap: 48px;
+  width: max-content;
+  animation: ln-marquee 32s linear infinite;
+}
+
+@keyframes ln-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(237, 251, 237, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(237, 251, 237, 0);
+  }
+}
+.ln-pulse {
+  animation: ln-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes ln-toast {
+  0%,
+  8% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  14%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+  78%,
+  100% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+.ln-toast {
+  animation: ln-toast 6s ease-in-out infinite;
+}
+
+@keyframes ln-slot {
+  0%,
+  18% {
+    background: transparent;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  22%,
+  40% {
+    background: #edfbed;
+    color: #13355a;
+    border-color: #edfbed;
+  }
+  44%,
+  100% {
+    background: transparent;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+}
+.ln-slot {
+  animation: ln-slot 7.5s ease-in-out infinite;
+}
+
+@keyframes ln-now {
+  from {
+    left: 6%;
+  }
+  to {
+    left: 92%;
+  }
+}
+.ln-now {
+  animation: ln-now 9s linear infinite alternate;
+}
+
+@keyframes ln-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.ln-draw {
+  transform-origin: 0 50%;
+  animation: ln-draw 2.4s cubic-bezier(0.6, 0, 0.2, 1) 1s both;
+}
+
+@keyframes ln-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ln-glow {
+  animation: ln-glow 5s ease-in-out infinite;
+}
+
+@keyframes ln-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+.ln-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
+  background-size: 200% 100%;
+  animation: ln-shimmer 3.5s linear infinite;
+}
+
+@keyframes ln-toggle {
+  0%,
+  45% {
+    transform: translateX(0);
+  }
+  55%,
+  100% {
+    transform: translateX(16px);
+  }
+}
+@keyframes ln-track {
+  0%,
+  45% {
+    background: rgba(255, 255, 255, 0.14);
+  }
+  55%,
+  100% {
+    background: #edfbed;
+  }
+}
+.ln-knob {
+  animation: ln-toggle 4s ease-in-out infinite alternate;
+}
+.ln-track {
+  animation: ln-track 4s ease-in-out infinite alternate;
+}
+
+.st {
+  animation-duration: 8s;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@keyframes st-sel {
+  0%,
+  11% {
+    background: transparent;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  13%,
+  100% {
+    background: #edfbed;
+    color: #13355a;
+    border-color: #edfbed;
+  }
+}
+@keyframes st-tap {
+  0%,
+  9% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  11% {
+    opacity: 1;
+  }
+  17%,
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+@keyframes st-tapb {
+  0%,
+  22% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  24% {
+    opacity: 1;
+  }
+  30%,
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+@keyframes st-press {
+  0%,
+  23% {
+    transform: none;
+  }
+  25% {
+    transform: scale(0.94);
+  }
+  28%,
+  100% {
+    transform: none;
+  }
+}
+@keyframes st-pay {
+  0%,
+  27% {
+    opacity: 0;
+  }
+  30%,
+  50% {
+    opacity: 1;
+  }
+  53%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes st-paying {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  42%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes st-paid {
+  0%,
+  40% {
+    opacity: 0;
+  }
+  42%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes st-bar {
+  0%,
+  29% {
+    transform: scaleX(0);
+  }
+  41%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+@keyframes st-booked {
+  0% {
+    opacity: 1;
+  }
+  3%,
+  50% {
+    opacity: 0;
+  }
+  53%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes st-mail {
+  0%,
+  52% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  56%,
+  70% {
+    opacity: 1;
+    transform: none;
+  }
+  74%,
+  100% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+@keyframes st-fly {
+  0%,
+  52% {
+    offset-distance: 0%;
+    opacity: 0;
+  }
+  55% {
+    offset-distance: 4%;
+    opacity: 1;
+  }
+  72% {
+    offset-distance: 100%;
+    opacity: 1;
+  }
+  76%,
+  100% {
+    offset-distance: 100%;
+    opacity: 0;
+  }
+}
+@keyframes st-row {
+  0%,
+  74% {
+    max-height: 0;
+    opacity: 0;
+  }
+  78%,
+  100% {
+    max-height: 60px;
+    opacity: 1;
+  }
+}
+@keyframes st-flash {
+  0%,
+  76% {
+    background: rgba(237, 251, 237, 0);
+  }
+  80% {
+    background: rgba(237, 251, 237, 0.16);
+  }
+  95%,
+  100% {
+    background: rgba(237, 251, 237, 0.04);
+  }
+}
+@keyframes st-c3 {
+  0%,
+  76% {
+    opacity: 1;
+  }
+  78%,
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes st-c4 {
+  0%,
+  76% {
+    opacity: 0;
+  }
+  78%,
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes st-toast {
+  0%,
+  77% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  81%,
+  96% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@keyframes st-dash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+.st-sel {
+  animation: st-sel 8s infinite;
+}
+.st-tap {
+  animation: st-tap 8s ease-out infinite;
+}
+.st-tap2 {
+  animation-name: st-tapb;
+}
+.st-press {
+  animation: st-press 8s infinite;
+}
+.st-pay {
+  animation: st-pay 8s infinite;
+}
+.st-paying {
+  animation: st-paying 8s infinite;
+}
+.st-paid {
+  animation: st-paid 8s infinite;
+}
+.st-bar {
+  animation: st-bar 8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.st-booked {
+  animation: st-booked 8s infinite;
+}
+.st-mail {
+  animation: st-mail 8s ease-out infinite;
+}
+.st-fly {
+  animation: st-fly 8s cubic-bezier(0.5, 0, 0.3, 1) infinite;
+}
+.st-row {
+  animation: st-row 8s ease-out infinite;
+}
+.st-flash {
+  animation: st-flash 8s infinite;
+}
+.st-c3 {
+  animation: st-c3 8s infinite;
+}
+.st-c4 {
+  animation: st-c4 8s infinite;
+}
+.st-toast {
+  animation: st-toast 8s ease-out infinite;
+}
+.st-dash {
+  animation: st-dash 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .st-sel,
+  .st-tap,
+  .st-press,
+  .st-pay,
+  .st-paying,
+  .st-paid,
+  .st-bar,
+  .st-booked,
+  .st-mail,
+  .st-fly,
+  .st-row,
+  .st-flash,
+  .st-c3,
+  .st-c4,
+  .st-toast,
+  .st-dash {
+    animation: none;
+  }
+}
+@keyframes ln-node {
+  0%,
+  2% {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.025);
+  }
+  6%,
+  24% {
+    border-color: rgba(237, 251, 237, 0.7);
+    box-shadow:
+      0 0 0 4px rgba(237, 251, 237, 0.08),
+      0 0 28px rgba(237, 251, 237, 0.18);
+    background: rgba(237, 251, 237, 0.06);
+  }
+  32%,
+  100% {
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+    background: rgba(255, 255, 255, 0.025);
+  }
+}
+.ln-node {
+  animation: ln-node 8s ease-in-out infinite;
+}
+@keyframes ln-icon {
+  0%,
+  2%,
+  32%,
+  100% {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+  }
+  6%,
+  24% {
+    background: #edfbed;
+    color: #13355a;
+  }
+}
+.ln-icon {
+  animation: ln-icon 8s ease-in-out infinite;
+}
+@keyframes ln-dot {
+  0%,
+  16% {
+    left: 0;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  36% {
+    left: 100%;
+    opacity: 1;
+  }
+  40%,
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+.ln-dot {
+  animation: ln-dot 8s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ln-node,
+  .ln-icon,
+  .ln-dot {
+    animation: none;
+  }
+  .ln-in,
+  .ln-tilt {
+    opacity: 1;
+    animation: none;
+    transform: none;
+  }
+  .ln-beam,
+  .ln-marquee,
+  .ln-pulse,
+  .ln-toast,
+  .ln-slot,
+  .ln-now,
+  .ln-draw,
+  .ln-glow,
+  .ln-shimmer,
+  .ln-knob,
+  .ln-track {
+    animation: none;
+  }
+  .ln-toast {
+    opacity: 1;
+  }
+}
