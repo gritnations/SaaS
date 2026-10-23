@@ -11,5 +11,5 @@ const browser = Object.fromEntries(
 export default [
   { ignores: ["schedule-booking/**", "node_modules/**", ".venv/**"] },
   js.configs.recommended,
-  { files: ["public/**/*.js"], languageOptions: { sourceType: "module", globals: browser } },
+  { files: ["public/**/*.js", "site/**/*.js"], languageOptions: { sourceType: "module", globals: browser } },
 ];

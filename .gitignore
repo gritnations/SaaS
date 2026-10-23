@@ -11,3 +11,6 @@ __pycache__/
 .env
 # Root lint tooling
 /node_modules/
+
+# Upload-time config for the pages in site/ (copy from site/assets/config.example.js).
+site/assets/config.js
