@@ -125,8 +125,8 @@ async function saveNewPassword(event) {
   busy("reset-btn", "Saving…");
   const result = await auth("/user", { password }, { method: "PUT", token: recoveryToken });
   busy("reset-btn", null);
-  input("new-password").value = "";
   if (result.status === 200) {
+    input("new-password").value = "";
     recoveryToken = "";
     show("signin-view");
     say("signin-note", "Password changed. Sign in with your new password.");
