@@ -2,66 +2,13 @@
 // The confirmation link returns to the owner dashboard at the site root, which finishes setting up the
 // business from the details saved with the login. All text reaches the page through textContent.
 
-import { AUTH_KEY, AUTH_URL } from "./config.js";
-
-const EMAIL = /^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$/;
-const DASHBOARD = `${location.origin}/`;
+import { DASHBOARD, EMAIL, NOT_CONFIGURED, auth, openDashboard, passwordToggle, say, setError } from "./auth.js";
 
 const form = document.getElementById("signup-form");
 const fields = ["company", "type", "other", "owner", "email", "password", "terms"];
 const input = (id) => document.getElementById(id);
 let lastEmail = "";
 let lastCompany = "";
-
-/**
- * Call the identity provider.
- * @param {string} path The path after /auth/v1, starting with "/".
- * @param {object} body The JSON body.
- * @returns {Promise<{status: number, data: any}>} The answer. status 0 means no answer.
- */
-async function auth(path, body) {
-  try {
-    const response = await fetch(AUTH_URL + path, {
-      method: "POST",
-      headers: { apikey: AUTH_KEY, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    let data = {};
-    try {
-      data = await response.json();
-    } catch {
-      data = {};
-    }
-    return { status: response.status, data };
-  } catch {
-    return { status: 0, data: {} };
-  }
-}
-
-/**
- * Show or clear one field's error.
- * @param {string} id The field id.
- * @param {string} message The error, or "" to clear it.
- */
-function setError(id, message) {
-  const error = document.getElementById(`${id}-err`);
-  const control = input(id);
-  error.textContent = message;
-  error.hidden = !message;
-  control.setAttribute("aria-invalid", message ? "true" : "false");
-  if (message) control.setAttribute("aria-describedby", `${id}-err`);
-  else control.removeAttribute("aria-describedby");
-}
-
-/**
- * Show a message above the button, or hide it.
- * @param {string} message The message, or "".
- */
-function formMessage(message) {
-  const box = input("form-msg");
-  box.textContent = message;
-  box.hidden = !message;
-}
 
 /**
  * Check every field and show what needs fixing.
@@ -121,10 +68,10 @@ function showDone() {
  */
 async function submit(event) {
   event.preventDefault();
-  formMessage("");
+  say("form-msg", "");
   if (!validate()) return;
-  if (AUTH_KEY.includes("your-key")) {
-    formMessage("Sign-up is not configured on this page yet.");
+  if (NOT_CONFIGURED) {
+    say("form-msg", "Sign-up is not configured on this page yet.");
     return;
   }
   const button = input("create");
@@ -152,12 +99,7 @@ async function submit(event) {
   }
   if (result.status === 200 && result.data.access_token) {
     // Email confirmation is off: hand the new session to the dashboard, which finishes the set-up.
-    const hash = new URLSearchParams({
-      access_token: result.data.access_token,
-      refresh_token: result.data.refresh_token || "",
-      type: "signup",
-    });
-    location.assign(`${DASHBOARD}#${hash}`);
+    openDashboard(result.data, "signup");
     return;
   }
   if (result.status === 200) {
@@ -171,7 +113,7 @@ async function submit(event) {
     422: "Check your email address, and choose a stronger password.",
     429: "Too many attempts. Please wait a few minutes and try again.",
   };
-  formMessage(messages[result.status] || "Your account couldn't be created right now. Please try again.");
+  say("form-msg", messages[result.status] || "Your account couldn't be created right now. Please try again.");
 }
 
 /** Send the confirmation email again. */
@@ -197,13 +139,7 @@ input("type").addEventListener("change", () => {
   input("other-wrap").hidden = input("type").value !== "other";
 });
 input("password").addEventListener("input", showStrength);
-input("pw-toggle").addEventListener("click", () => {
-  const field = input("password");
-  const show = field.type === "password";
-  field.type = show ? "text" : "password";
-  input("pw-toggle").textContent = show ? "Hide" : "Show";
-  input("pw-toggle").setAttribute("aria-pressed", String(show));
-});
+passwordToggle("pw-toggle", "password");
 input("resend").addEventListener("click", resend);
 input("restart").addEventListener("click", () => {
   input("done-view").hidden = true;

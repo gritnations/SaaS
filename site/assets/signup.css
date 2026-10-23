@@ -219,3 +219,12 @@ body.signup {
 #done-view .chip-btn {
   justify-self: center;
 }
+
+.forgot {
+  justify-self: center;
+  margin-top: 6px;
+}
+
+.beam-inner .btn + .btn {
+  margin-top: 6px;
+}

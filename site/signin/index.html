@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co; base-uri 'none'; form-action 'none'"
+    />
+    <title>Sign in</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/landing-motion.css" />
+    <link rel="stylesheet" href="/assets/signup.css" />
+    <script type="module" src="/assets/signin.js"></script>
+  </head>
+  <body class="signup">
+    <header class="signup-top">
+      <a class="brand" href="/home/">GRIT<span>NATIONS</span></a>
+      <a class="signin-link" href="/signup/">Start free trial</a>
+    </header>
+
+    <main class="signup-main">
+      <section id="signin-view" aria-labelledby="signin-h">
+        <h1 id="signin-h" class="ln-in d1 ln-grad" tabindex="-1">Welcome back</h1>
+        <p class="lead ln-in d2">Sign in to see today's bookings and manage your business.</p>
+        <p class="notice" id="signin-note" role="status" hidden></p>
+
+        <div class="beam-card ln-in d3">
+          <div class="ln-beam" aria-hidden="true"></div>
+          <form id="signin-form" class="beam-inner" novalidate>
+            <label class="field" for="email"
+              >Email
+              <input id="email" name="email" type="email" autocomplete="username" maxlength="254" required />
+              <span class="error" id="email-err" hidden></span>
+            </label>
+
+            <div class="field">
+              <label for="password">Password</label>
+              <span class="pw-wrap">
+                <input id="password" name="password" type="password" autocomplete="current-password" required />
+                <button type="button" class="pw-toggle" id="pw-toggle" aria-pressed="false" aria-controls="password">
+                  Show
+                </button>
+              </span>
+              <span class="error" id="password-err" hidden></span>
+            </div>
+
+            <p class="notice warn" id="signin-msg" role="alert" hidden></p>
+            <button class="btn ghost block" type="button" id="resend-confirm" hidden>
+              Send the confirmation email again
+            </button>
+            <button class="btn block gn-cta" type="submit" id="signin-btn">Sign in</button>
+            <button class="chip-btn forgot" type="button" id="forgot-btn">Forgot password?</button>
+          </form>
+        </div>
+        <p class="small muted center">New here? <a href="/signup/">Start your free trial</a></p>
+      </section>
+
+      <section id="forgot-view" aria-labelledby="forgot-h" hidden>
+        <h1 id="forgot-h" class="ln-grad" tabindex="-1">Reset your password</h1>
+        <p class="lead">Enter your email and we'll send you a link to choose a new password.</p>
+        <div class="beam-card">
+          <div class="ln-beam" aria-hidden="true"></div>
+          <form id="forgot-form" class="beam-inner" novalidate>
+            <label class="field" for="forgot-email"
+              >Email
+              <input id="forgot-email" name="email" type="email" autocomplete="username" maxlength="254" required />
+              <span class="error" id="forgot-email-err" hidden></span>
+            </label>
+            <p class="notice" id="forgot-msg" role="status" hidden></p>
+            <button class="btn block gn-cta" type="submit" id="forgot-send">Send reset link</button>
+            <button class="chip-btn forgot" type="button" id="back-to-signin">Back to sign in</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="reset-view" aria-labelledby="reset-h" hidden>
+        <h1 id="reset-h" class="ln-grad" tabindex="-1">Choose a new password</h1>
+        <p class="lead">Use at least 8 characters.</p>
+        <div class="beam-card">
+          <div class="ln-beam" aria-hidden="true"></div>
+          <form id="reset-form" class="beam-inner" novalidate>
+            <div class="field">
+              <label for="new-password">New password</label>
+              <span class="pw-wrap">
+                <input
+                  id="new-password"
+                  name="password"
+                  type="password"
+                  autocomplete="new-password"
+                  minlength="8"
+                  required
+                />
+                <button
+                  type="button"
+                  class="pw-toggle"
+                  id="new-pw-toggle"
+                  aria-pressed="false"
+                  aria-controls="new-password"
+                >
+                  Show
+                </button>
+              </span>
+              <span class="error" id="new-password-err" hidden></span>
+            </div>
+            <p class="notice warn" id="reset-msg" role="alert" hidden></p>
+            <button class="btn block gn-cta" type="submit" id="reset-btn">Save new password</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">GritNations Ltd · London</footer>
+  </body>
+</html>
