@@ -606,3 +606,315 @@ body.app {
   font-weight: 700;
   box-shadow: inset 0 3px 0 var(--mint);
 }
+
+/* Shared bits for the owner screens */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ok {
+  color: var(--mint);
+  font-weight: 600;
+}
+
+.panel > h2 + .small,
+.panel > h2 + p {
+  margin: 6px 0 14px;
+}
+
+.check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  cursor: pointer;
+}
+
+.check-row input {
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex: 0 0 auto;
+  accent-color: var(--mint);
+}
+
+.check-row.compact {
+  align-items: center;
+  padding: 6px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Bookings */
+
+.link-row,
+.as-button {
+  width: 100%;
+  color: inherit;
+  text-decoration: none;
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.link-row:hover,
+.as-button:hover {
+  background: rgba(255, 255, 255, 0.025);
+  color: inherit;
+}
+
+.bk-details {
+  display: grid;
+  gap: 12px;
+  padding: 14px 20px 18px;
+  background: rgba(0, 0, 0, 0.18);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bk-details dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 6px 14px;
+  font-size: 14px;
+}
+
+.bk-details dt {
+  color: var(--muted);
+}
+
+.bk-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.bk-details .chip-btn,
+.found .chip-btn {
+  justify-self: start;
+}
+
+.confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+}
+
+.confirm p {
+  margin: 0;
+}
+
+.range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lookup {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inline-form .field {
+  margin: 0;
+  flex: 1 1 220px;
+}
+
+.inline-form .btn {
+  min-height: 48px;
+}
+
+.found {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.found-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+}
+
+/* Services */
+
+.svc-list {
+  display: grid;
+  gap: 12px;
+}
+
+.svc-card,
+.svc-form {
+  display: grid;
+  gap: 4px 14px;
+  align-items: end;
+}
+
+.svc-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.svc-card.off {
+  opacity: 0.6;
+}
+
+.svc-card .field,
+.svc-form .field {
+  margin: 0 0 6px;
+}
+
+@media (min-width: 800px) {
+  .svc-card {
+    grid-template-columns: minmax(0, 2fr) 110px 120px minmax(0, 1.4fr);
+  }
+
+  .svc-card .row {
+    grid-column: 1 / -1;
+  }
+
+  .svc-form {
+    grid-template-columns: minmax(0, 2fr) 150px 160px auto;
+  }
+
+  .svc-form .btn {
+    margin-bottom: 6px;
+  }
+}
+
+/* Opening hours */
+
+.hours {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.day-row {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+@media (min-width: 700px) {
+  .day-row {
+    grid-template-columns: 170px minmax(0, 1fr);
+    align-items: center;
+  }
+}
+
+.blocks {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.block input[type="time"] {
+  min-height: 42px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font: inherit;
+  color-scheme: dark;
+}
+
+.block input[type="time"]:focus {
+  outline: none;
+  border-color: var(--mint);
+  box-shadow: 0 0 0 3px rgba(237, 251, 237, 0.25);
+}
+
+/* Settings */
+
+.settings {
+  display: grid;
+  gap: 20px;
+}
+
+.settings .btn {
+  justify-self: start;
+}
+
+@media (min-width: 800px) {
+  .rules {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 20px;
+  }
+}
+
+/* Plan */
+
+.plan-now {
+  display: grid;
+  gap: 8px;
+}
+
+.plan-now h2 {
+  font-size: 24px;
+}
+
+.plan-now p {
+  margin: 0;
+}
+
+.plan-now .btn {
+  justify-self: start;
+}
+
+.plans {
+  display: grid;
+  gap: 16px;
+}
+
+@media (min-width: 700px) {
+  .plans {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.plan-choice {
+  display: grid;
+  gap: 10px;
+}
+
+.plan-choice .price {
+  margin: 0;
+}
+
+.plan-choice .price strong {
+  font-size: 32px;
+  letter-spacing: -0.02em;
+}
+
+.plan-choice .btn {
+  justify-self: start;
+}

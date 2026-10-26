@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Services</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/services.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">What customers can book</span>
+          <h1 id="head-title">Services</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <section class="panel" aria-labelledby="svc-h">
+        <h2 id="svc-h">Your services</h2>
+        <p class="small muted">
+          Change a service and press Save. Turn a service off to hide it from your booking page.
+        </p>
+        <p class="notice" id="svc-msg" role="status" hidden></p>
+        <div class="svc-list" id="svc-list"><p class="loading">Loading services…</p></div>
+      </section>
+
+      <section class="panel" aria-labelledby="add-h">
+        <h2 id="add-h">Add a service</h2>
+        <form id="add-form" class="svc-form" novalidate>
+          <label class="field" for="add-name">Name <input id="add-name" type="text" maxlength="120" required /></label>
+          <label class="field" for="add-min"
+            >Length (minutes) <input id="add-min" type="number" min="5" max="480" step="5" value="30" required
+          /></label>
+          <label class="field" for="add-price"
+            >Price (£, 0 for free) <input id="add-price" type="number" min="0" step="0.01" value="0" required
+          /></label>
+          <button class="btn small" type="submit">Add service</button>
+        </form>
+        <p class="notice warn" id="add-msg" role="alert" hidden></p>
+      </section>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

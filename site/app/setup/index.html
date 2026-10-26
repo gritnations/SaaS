@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Set up your business</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/landing-motion.css" />
+    <link rel="stylesheet" href="/assets/signup.css" />
+    <script type="module" src="/assets/setup.js"></script>
+  </head>
+  <body class="signup">
+    <header class="signup-top">
+      <span class="brand">GRIT<span>NATIONS</span></span>
+    </header>
+
+    <main class="signup-main">
+      <section aria-labelledby="setup-h">
+        <span class="pill ln-in d1"
+          ><span class="ln-shimmer" aria-hidden="true"></span><span class="dot" aria-hidden="true"></span>Email
+          confirmed</span
+        >
+        <h1 id="setup-h" class="ln-in d2 ln-grad">Set up your business</h1>
+        <p class="lead ln-in d3">Check your details. Your 14-day Starter trial starts when you continue.</p>
+
+        <div class="beam-card ln-in d4">
+          <div class="ln-beam" aria-hidden="true"></div>
+          <form id="setup-form" class="beam-inner" novalidate>
+            <label class="field" for="company"
+              >Business name
+              <input id="company" type="text" autocomplete="organization" maxlength="120" required />
+              <span class="error" id="company-err" hidden></span>
+            </label>
+
+            <label class="field" for="type"
+              >What does your business do?
+              <select id="type" required>
+                <option value="">Choose one</option>
+                <option value="barbershop">Barbershop</option>
+                <option value="car_wash">Car wash</option>
+                <option value="clinic">Clinic</option>
+                <option value="consulting">Consulting</option>
+                <option value="education">Education</option>
+                <option value="events">Events and parties</option>
+                <option value="spa">Spa</option>
+                <option value="photographer">Photographer</option>
+                <option value="salon">Salon</option>
+                <option value="fitness">Fitness</option>
+                <option value="other">Other</option>
+              </select>
+              <span class="error" id="type-err" hidden></span>
+            </label>
+
+            <label class="field" for="other" id="other-wrap" hidden
+              >Describe it briefly
+              <input id="other" type="text" maxlength="60" />
+              <span class="error" id="other-err" hidden></span>
+            </label>
+
+            <label class="field" for="owner"
+              >Your name
+              <input id="owner" type="text" autocomplete="name" maxlength="100" required />
+              <span class="error" id="owner-err" hidden></span>
+            </label>
+
+            <p class="notice warn" id="form-msg" role="alert" hidden></p>
+            <button class="btn block gn-cta" type="submit" id="create">Continue to your dashboard</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">GritNations Ltd · London</footer>
+  </body>
+</html>

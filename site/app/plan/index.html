@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Your plan</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/plan.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">Plans and billing</span>
+          <h1 id="head-title">Your plan</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <p class="notice" id="return-msg" role="status" hidden></p>
+
+      <section class="panel plan-now" aria-labelledby="now-h">
+        <span class="eyebrow">Current plan</span>
+        <h2 id="now-h">…</h2>
+        <p class="muted" id="now-note"></p>
+        <button class="btn ghost" type="button" id="manage" hidden>Manage subscription</button>
+      </section>
+
+      <section class="plans" id="plans" aria-label="Choose a plan" hidden>
+        <div class="panel plan-choice">
+          <h2>Starter</h2>
+          <p class="price"><strong>£9</strong> a month <span class="small muted">(test price)</span></p>
+          <button class="btn" type="button" data-plan="starter">Choose Starter</button>
+        </div>
+        <div class="panel plan-choice">
+          <h2>Pro</h2>
+          <p class="price"><strong>£29</strong> a month <span class="small muted">(test price)</span></p>
+          <button class="btn ghost" type="button" data-plan="pro">Choose Pro</button>
+        </div>
+      </section>
+      <p class="small muted">You pay securely on Stripe's page. Plan contents are still being finalised.</p>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

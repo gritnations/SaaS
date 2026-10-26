@@ -145,6 +145,10 @@ async function saveNewPassword(event) {
 
 /** Act on a return from a reset email: #access_token=…&type=recovery, or an expired-link error. */
 function readReturn() {
+  if (new URLSearchParams(location.search).get("link") === "expired") {
+    history.replaceState(null, "", location.pathname);
+    say("signin-note", "That email link has expired or was already used. Sign in, or ask for a new link.");
+  }
   const hash = new URLSearchParams(location.hash.slice(1));
   if (!hash.size) return;
   history.replaceState(null, "", location.pathname + location.search);

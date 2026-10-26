@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Settings</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/settings.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">Your business and booking rules</span>
+          <h1 id="head-title">Settings</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <form id="settings-form" class="settings" novalidate>
+        <section class="panel" aria-labelledby="biz-h">
+          <h2 id="biz-h">Your business</h2>
+          <label class="field" for="s-name"
+            >Business name <input id="s-name" type="text" maxlength="120" required
+          /></label>
+          <label class="field" for="s-contact"
+            >Email for booking notifications (private)
+            <input id="s-contact" type="email" maxlength="254" autocomplete="email"
+          /></label>
+          <label class="field" for="s-meeting"
+            >Meeting link for customers (optional)
+            <input id="s-meeting" type="url" maxlength="500" placeholder="https://"
+          /></label>
+        </section>
+
+        <section class="panel" aria-labelledby="pub-h">
+          <h2 id="pub-h">Contact details on your booking page</h2>
+          <p class="small muted">Shown to customers. Leave a box empty to hide it.</p>
+          <label class="field" for="s-address">Address <input id="s-address" type="text" maxlength="200" /></label>
+          <label class="field" for="s-phone">Phone <input id="s-phone" type="tel" maxlength="32" /></label>
+          <label class="field" for="s-email">Email <input id="s-email" type="email" maxlength="254" /></label>
+        </section>
+
+        <section class="panel" aria-labelledby="rules-h">
+          <h2 id="rules-h">Booking rules</h2>
+          <div class="rules">
+            <label class="field" for="s-notice"
+              >Customers can book up to … hours ahead of a session at the latest
+              <input id="s-notice" type="number" min="0" max="720" step="0.5"
+            /></label>
+            <label class="field" for="s-window"
+              >How many days ahead customers can book <input id="s-window" type="number" min="1" max="365"
+            /></label>
+            <label class="field" for="s-break"
+              >Break between bookings (minutes) <input id="s-break" type="number" min="0" max="240" step="5"
+            /></label>
+            <label class="field" for="s-cancel"
+              >Customers can cancel online up to … hours before
+              <input id="s-cancel" type="number" min="0" max="720" step="0.5"
+            /></label>
+            <label class="field" for="s-move"
+              >Customers can change the time online up to … hours before
+              <input id="s-move" type="number" min="0" max="720" step="0.5"
+            /></label>
+          </div>
+        </section>
+
+        <p class="notice" id="settings-msg" role="status" hidden></p>
+        <button class="btn" type="submit" id="save-settings">Save settings</button>
+      </form>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

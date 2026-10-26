@@ -15,41 +15,16 @@
     <script type="module" src="/assets/app.js"></script>
   </head>
   <body class="app">
-    <aside class="side" aria-label="Main menu">
-      <a class="brand" href="/app/">GRIT<span>NATIONS</span></a>
-      <div class="biz">
-        <span class="biz-badge" id="biz-badge" aria-hidden="true"></span>
-        <span class="biz-text"><strong id="biz-name">Loading…</strong><span id="biz-plan"></span></span>
-      </div>
-      <nav class="menu">
-        <a class="on" href="/app/" aria-current="page"><i aria-hidden="true"></i>Today</a>
-        <a href="/#go=today"><i aria-hidden="true"></i>Bookings</a>
-        <a href="/#go=services"><i aria-hidden="true"></i>Services</a>
-        <a href="/#go=services"><i aria-hidden="true"></i>Opening hours</a>
-        <a href="/#go=payments"><i aria-hidden="true"></i>Payments</a>
-        <a href="/#go=services"><i aria-hidden="true"></i>Settings</a>
-      </nav>
-      <section class="plan-card" aria-labelledby="plan-h">
-        <span class="eyebrow" id="plan-h">Your plan</span>
-        <strong id="plan-name">…</strong>
-        <span class="bar" aria-hidden="true"><i id="plan-bar"></i></span>
-        <span class="small muted" id="plan-note"></span>
-        <a class="small" href="/#go=today" id="plan-link">Choose a plan →</a>
-      </section>
-      <button class="signout" type="button" id="signout">Sign out</button>
-    </aside>
-
+    <aside class="side" id="side" aria-label="Main menu"></aside>
     <main class="main">
       <header class="head">
         <div>
-          <span class="muted small" id="today-date"></span>
-          <h1 id="greeting">Today</h1>
+          <span class="muted small" id="head-sub"></span>
+          <h1 id="head-title">Today</h1>
         </div>
         <a class="btn ghost small" id="open-page" href="#" target="_blank" rel="noopener">Open your booking page ↗</a>
       </header>
-
       <p class="notice warn" id="app-msg" role="alert" hidden></p>
-
       <section class="panel setup" id="setup" aria-labelledby="setup-h" hidden>
         <div class="setup-head">
           <div>
@@ -71,7 +46,7 @@
             </div>
           </div>
           <div id="bk-list"><p class="loading pad">Loading bookings…</p></div>
-          <a class="see-all" href="/#go=today">See all bookings and look one up →</a>
+          <a class="see-all" href="/app/bookings/">See all bookings →</a>
         </section>
 
         <div class="col">
@@ -100,12 +75,6 @@
         </div>
       </div>
     </main>
-
-    <nav class="bottom-nav" aria-label="Main menu">
-      <a class="on" href="/app/" aria-current="page">Today</a>
-      <a href="/#go=today">Bookings</a>
-      <a href="/#go=services">Services</a>
-      <a href="/#go=payments">Payments</a>
-    </nav>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
   </body>
 </html>

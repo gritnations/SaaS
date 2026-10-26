@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Payments</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/payments.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">How your customers pay</span>
+          <h1 id="head-title">Payments</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <p class="notice" id="return-msg" role="status" hidden></p>
+
+      <section class="panel" aria-labelledby="stripe-h">
+        <h2 id="stripe-h">Card payments with Stripe</h2>
+        <p class="small muted" id="stripe-state">Loading…</p>
+        <button class="btn" type="button" id="connect" hidden>Connect Stripe</button>
+      </section>
+
+      <section class="panel" aria-labelledby="opt-h">
+        <h2 id="opt-h">How customers pay for paid services</h2>
+        <label class="check-row" for="opt-online"
+          ><input id="opt-online" type="checkbox" />
+          <span
+            ><strong>Online by card</strong><br /><span class="small muted" id="online-note"
+              >Customers pay when they book.</span
+            ></span
+          ></label
+        >
+        <label class="check-row" for="opt-venue"
+          ><input id="opt-venue" type="checkbox" />
+          <span
+            ><strong>At the venue</strong><br /><span class="small muted">Customers pay when they arrive.</span></span
+          ></label
+        >
+        <p class="notice" id="opt-msg" role="status" hidden></p>
+        <button class="btn" type="button" id="save-options">Save</button>
+      </section>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

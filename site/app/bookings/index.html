@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Bookings</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/bookings.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">Every booking, by day</span>
+          <h1 id="head-title">Bookings</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <section class="panel lookup" aria-labelledby="look-h">
+        <h2 id="look-h">Find a booking</h2>
+        <form id="look-form" class="inline-form" novalidate>
+          <label class="field grow" for="look-ref"
+            >Reference
+            <input id="look-ref" type="text" maxlength="10" autocomplete="off" placeholder="For example H49FV82SPR" />
+          </label>
+          <button class="btn small" type="submit">Find</button>
+        </form>
+        <div id="look-result"></div>
+      </section>
+
+      <section class="panel bookings" aria-labelledby="bk-h">
+        <div class="bk-head">
+          <h2 id="bk-h">Bookings</h2>
+          <div class="range">
+            <button type="button" class="mini" id="prev" aria-label="Earlier two weeks">←</button>
+            <span class="small" id="range-label"></span>
+            <button type="button" class="mini" id="next" aria-label="Later two weeks">→</button>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Which bookings">
+            <button type="button" role="tab" id="tab-all" aria-selected="true">All</button>
+            <button type="button" role="tab" id="tab-live" aria-selected="false">Confirmed</button>
+            <button type="button" role="tab" id="tab-cancelled" aria-selected="false">Cancelled</button>
+          </div>
+        </div>
+        <div id="bk-list"><p class="loading pad">Loading bookings…</p></div>
+      </section>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>
