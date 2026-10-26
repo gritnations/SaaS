@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Today</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/app.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" aria-label="Main menu">
+      <a class="brand" href="/app/">GRIT<span>NATIONS</span></a>
+      <div class="biz">
+        <span class="biz-badge" id="biz-badge" aria-hidden="true"></span>
+        <span class="biz-text"><strong id="biz-name">Loading…</strong><span id="biz-plan"></span></span>
+      </div>
+      <nav class="menu">
+        <a class="on" href="/app/" aria-current="page"><i aria-hidden="true"></i>Today</a>
+        <a href="/#go=today"><i aria-hidden="true"></i>Bookings</a>
+        <a href="/#go=services"><i aria-hidden="true"></i>Services</a>
+        <a href="/#go=services"><i aria-hidden="true"></i>Opening hours</a>
+        <a href="/#go=payments"><i aria-hidden="true"></i>Payments</a>
+        <a href="/#go=services"><i aria-hidden="true"></i>Settings</a>
+      </nav>
+      <section class="plan-card" aria-labelledby="plan-h">
+        <span class="eyebrow" id="plan-h">Your plan</span>
+        <strong id="plan-name">…</strong>
+        <span class="bar" aria-hidden="true"><i id="plan-bar"></i></span>
+        <span class="small muted" id="plan-note"></span>
+        <a class="small" href="/#go=today" id="plan-link">Choose a plan →</a>
+      </section>
+      <button class="signout" type="button" id="signout">Sign out</button>
+    </aside>
+
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="today-date"></span>
+          <h1 id="greeting">Today</h1>
+        </div>
+        <a class="btn ghost small" id="open-page" href="#" target="_blank" rel="noopener">Open your booking page ↗</a>
+      </header>
+
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+
+      <section class="panel setup" id="setup" aria-labelledby="setup-h" hidden>
+        <div class="setup-head">
+          <div>
+            <h2 id="setup-h">Get ready for bookings</h2>
+            <span class="small muted" id="setup-count"></span>
+          </div>
+          <span class="segments" id="setup-bar" aria-hidden="true"></span>
+        </div>
+        <ol class="steps-grid" id="setup-steps"></ol>
+      </section>
+
+      <div class="grid">
+        <section class="panel bookings" aria-labelledby="bk-h">
+          <div class="bk-head">
+            <h2 id="bk-h">Upcoming bookings</h2>
+            <div class="tabs" role="tablist" aria-label="Which bookings">
+              <button type="button" role="tab" id="tab-upcoming" aria-selected="true">Upcoming</button>
+              <button type="button" role="tab" id="tab-cancelled" aria-selected="false">Cancelled</button>
+            </div>
+          </div>
+          <div id="bk-list"><p class="loading pad">Loading bookings…</p></div>
+          <a class="see-all" href="/#go=today">See all bookings and look one up →</a>
+        </section>
+
+        <div class="col">
+          <section class="panel share" id="share" aria-labelledby="share-h">
+            <h2 id="share-h">Share your booking link</h2>
+            <div class="link-box">
+              <span id="share-link">…</span>
+              <button type="button" class="mini" id="copy">Copy</button>
+            </div>
+            <div class="two">
+              <button type="button" class="btn ghost small" id="share-btn">Share…</button>
+              <a class="btn ghost small" id="share-open" href="#" target="_blank" rel="noopener">Open</a>
+            </div>
+            <p class="small muted" id="share-msg" role="status"></p>
+          </section>
+
+          <section class="panel week" aria-labelledby="wk-h">
+            <h2 id="wk-h">This week</h2>
+            <div class="stats">
+              <div><strong id="st-count">–</strong><span>Bookings</span></div>
+              <div><strong id="st-paid">–</strong><span>Paid online</span></div>
+              <div><strong id="st-venue">–</strong><span>Due at the venue</span></div>
+              <div><strong id="st-cancelled">–</strong><span>Cancelled</span></div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <nav class="bottom-nav" aria-label="Main menu">
+      <a class="on" href="/app/" aria-current="page">Today</a>
+      <a href="/#go=today">Bookings</a>
+      <a href="/#go=services">Services</a>
+      <a href="/#go=payments">Payments</a>
+    </nav>
+  </body>
+</html>
