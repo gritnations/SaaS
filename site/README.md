@@ -1,34 +1,52 @@
 # Pages for the password-protected staging site
 
-The landing page (`home/`), owner sign-up (`signup/`), owner sign-in (`signin/`) and the owner's Today screen (`app/`)
-are uploaded by hand to the staging site, which is behind a password while the product is not launched. They are not served by the API's host; the customer pages in
-`public/` are.
+These pages are uploaded by hand to the staging site, which is behind a password while the product is not
+launched. They are not served by the API's host; the customer pages in `public/` are.
+
+## Pages
+
+| Path            | Page                                                                      |
+| --------------- | ------------------------------------------------------------------------- |
+| `index.html`    | The site root: no page of its own, it forwards each kind of link (below). |
+| `home/`         | Landing page.                                                             |
+| `signup/`       | Owner sign-up.                                                            |
+| `signin/`       | Owner sign-in, forgotten password and new password.                       |
+| `app/`          | Owner Today screen.                                                       |
+| `app/bookings/` | Bookings: by day, look-up by reference, details, cancel.                  |
+| `app/services/` | Services: edit and add.                                                   |
+| `app/hours/`    | Opening hours: weekly editor.                                             |
+| `app/settings/` | Business details, customer contact details and booking rules.             |
+| `app/payments/` | Stripe connection and how customers pay.                                  |
+| `app/plan/`     | Plan, upgrades and the subscription portal.                               |
+| `app/setup/`    | Creates the business after a new owner confirms their email.              |
 
 ## Upload layout
 
-The pages sit next to the owner dashboard, which is the staging site's `index.html`:
+Upload the contents of `site/` (without this README) to the staging site's root, plus:
 
 ```text
-index.html            owner dashboard (not in this repository)
-home/index.html       from site/home/
-signup/index.html     from site/signup/
-signin/index.html     from site/signin/
-app/index.html        from site/app/
-assets/               public/assets/gn.css, gn.js and fonts/, plus everything in site/assets/
-assets/config.js      made from site/assets/config.example.js with the real values
+assets/gn.css, assets/gn.js, assets/fonts/   from public/assets/
+assets/config.js                              made from site/assets/config.example.js with the real values
 ```
 
-## How sign-up works
+Keep the staging site's own `.htaccess` (password protection) and `.htpasswd`.
 
-The sign-up page creates the login with the identity provider and asks it to send the confirmation email. The link in
-that email returns to the dashboard at the site root, which finishes setting up the business from the details saved
-with the login.
+## How the site root forwards links
 
-The sign-in page signs the owner in, keeps the session for that browser tab (where the existing dashboard screens also
-read it) and opens the Today screen. The Today screen's menu opens the existing dashboard screens with `#go=today`,
-`#go=services` or `#go=payments` until those screens are redesigned. "Forgot password" sends a reset link back to the
-sign-in page, which then asks for the new password. For that link to return there rather than to the dashboard, the
-sign-in page's address must be on the identity provider's list of allowed redirect addresses.
+| Arrives with                                          | Goes to                                     |
+| ----------------------------------------------------- | ------------------------------------------- |
+| `#access_token=…&type=signup` (confirmation email)    | `/app/` (then `/app/setup/` if no business) |
+| `#access_token=…&type=recovery` (reset email)         | `/signin/` new-password step                |
+| `#error=…` (expired email link)                       | `/signin/?link=expired`                     |
+| `#billing=…` (Stripe plan checkout or portal)         | `/app/plan/`                                |
+| `#payments=…` (Stripe account set-up)                 | `/app/payments/`                            |
+| `?b=<business>` or `#manage=…` (older customer links) | The customer pages on the booking host      |
+| Nothing                                               | `/app/` when signed in, otherwise `/home/`  |
 
-`config.js` holds only the identity project URL and its publishable key, which are public by design. It is not
-committed. Never put a secret or service-role key in it.
+## Sessions
+
+Sign-in keeps the owner's session for the browser tab (`sessionStorage`) and every owner page reads it there. An
+expired session is renewed once with the refresh token; otherwise the page returns to sign-in.
+
+`config.js` holds only the identity project URL and its publishable key, which are public by design, and two web
+addresses. It is not committed. Never put a secret or service-role key in it.

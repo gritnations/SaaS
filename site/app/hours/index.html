@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Opening hours</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/hours.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">When customers can book you</span>
+          <h1 id="head-title">Opening hours</h1>
+        </div>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <section class="panel" aria-labelledby="hours-h">
+        <h2 id="hours-h">Weekly hours</h2>
+        <p class="small muted">
+          Turn a day on, set its times, and add a second time block for a break. Times are in your business's time zone.
+        </p>
+        <div class="hours" id="hours"><p class="loading">Loading hours…</p></div>
+        <p class="notice" id="hours-msg" role="status" hidden></p>
+        <button class="btn" type="button" id="save-hours">Save opening hours</button>
+      </section>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

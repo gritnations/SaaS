@@ -17,6 +17,8 @@ const browser = Object.fromEntries(
     "sessionStorage",
     "localStorage",
     "navigator",
+    "atob",
+    "TextDecoder",
   ].map((name) => [name, "readonly"]),
 );
 
