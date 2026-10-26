@@ -26,4 +26,5 @@ export default [
   { ignores: ["schedule-booking/**", "node_modules/**", ".venv/**"] },
   js.configs.recommended,
   { files: ["public/**/*.js", "site/**/*.js"], languageOptions: { sourceType: "module", globals: browser } },
+  { files: ["site/stamp-version.mjs"], languageOptions: { globals: { console: "readonly" } } },
 ];
