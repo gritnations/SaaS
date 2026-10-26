@@ -82,6 +82,26 @@ export function passwordToggle(buttonId, fieldId) {
 }
 
 /**
+ * Keep a new sign-in for this browser tab and open the owner's Today screen.
+ * The session is saved where the existing owner screens also read it, so the menu links keep working.
+ * @param {{access_token: string, refresh_token?: string}} session The identity provider's session.
+ * @param {string} email The email the owner signed in with.
+ */
+export function startOwnerSession(session, email) {
+  try {
+    sessionStorage.setItem(
+      "gn_owner_session",
+      JSON.stringify({ access: session.access_token, refresh: session.refresh_token || "", email }),
+    );
+  } catch {
+    // Storage unavailable: hand the session over in the address instead.
+    openDashboard(session, "signin");
+    return;
+  }
+  location.assign("/app/");
+}
+
+/**
  * Open the dashboard with a session, the same way the sign-up confirmation link does.
  * The tokens travel after "#", so they never reach a server, and the dashboard removes them on arrival.
  * @param {{access_token: string, refresh_token?: string}} session The identity provider's session.

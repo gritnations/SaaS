@@ -3,9 +3,21 @@
 import js from "@eslint/js";
 
 const browser = Object.fromEntries(
-  ["window", "document", "location", "history", "fetch", "URL", "URLSearchParams", "Blob", "Intl", "setTimeout"].map(
-    (name) => [name, "readonly"],
-  ),
+  [
+    "window",
+    "document",
+    "location",
+    "history",
+    "fetch",
+    "URL",
+    "URLSearchParams",
+    "Blob",
+    "Intl",
+    "setTimeout",
+    "sessionStorage",
+    "localStorage",
+    "navigator",
+  ].map((name) => [name, "readonly"]),
 );
 
 export default [

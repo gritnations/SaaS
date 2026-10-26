@@ -1,8 +1,8 @@
 // Owner sign-in, with forgotten-password and new-password steps.
-// A successful sign-in hands the session to the owner dashboard at the site root, the same way the sign-up
-// confirmation link does. All text reaches the page through textContent.
+// A successful sign-in keeps the session for this tab and opens the owner's Today screen.
+// All text reaches the page through textContent.
 
-import { EMAIL, NOT_CONFIGURED, auth, openDashboard, passwordToggle, say, setError } from "./auth.js";
+import { EMAIL, NOT_CONFIGURED, auth, passwordToggle, say, setError, startOwnerSession } from "./auth.js";
 
 const RESET_RETURN = `${location.origin}/signin/`;
 const input = (id) => document.getElementById(id);
@@ -53,7 +53,7 @@ async function signIn(event) {
   busy("signin-btn", null);
   if (result.status === 200 && result.data.access_token) {
     input("password").value = "";
-    openDashboard(result.data, "signin");
+    startOwnerSession(result.data, email);
     return;
   }
   const code = result.data.error_code || result.data.code || "";
