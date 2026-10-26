@@ -6,6 +6,8 @@ import { bookingChip, notice, owner, publicBusiness, startOwnerPage } from "./ow
 
 const RANGE_DAYS = 14;
 const REFERENCE = /^[A-Za-z0-9]{10}$/;
+/** An email made only of ordinary characters. Anything else is shown as text, never as a link, because a "?" or "&" could pre-fill a message when clicked. */
+const PLAIN_EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const input = (id) => document.getElementById(id);
 const data = { slug: "", currency: "GBP", zone: "Europe/London", start: "", bookings: [], filter: "all", open: "" };
 
@@ -49,7 +51,9 @@ function details(b) {
       {},
       ...rows.flatMap(([label, value]) => {
         const dd =
-          label === "Email" ? el("dd", {}, el("a", { href: `mailto:${value}` }, value)) : el("dd", {}, String(value));
+          label === "Email" && PLAIN_EMAIL.test(value)
+            ? el("dd", {}, el("a", { href: `mailto:${value}` }, value))
+            : el("dd", {}, String(value));
         return [el("dt", {}, label), dd];
       }),
     ),
