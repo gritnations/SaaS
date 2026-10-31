@@ -17,7 +17,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 | `app/hours/`    | Opening hours: weekly editor.                                             |
 | `app/settings/` | Business details, customer contact details and booking rules.             |
 | `app/payments/` | Stripe connection and how customers pay.                                  |
-| `app/plan/`     | Plan, upgrades and the subscription portal.                               |
+| `app/plan/`     | Plan, upgrades, the subscription portal, and cancel with a refund.         |
 | `app/more/`     | Phone menu page: Opening hours, Payments, Your plan, Sign out.            |
 | `app/setup/`    | Creates the business after a new owner confirms their email.              |
 
