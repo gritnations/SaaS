@@ -18,6 +18,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 | `app/settings/` | Business details, customer contact details and booking rules.             |
 | `app/payments/` | Stripe connection and how customers pay.                                  |
 | `app/plan/`     | Plan, upgrades and the subscription portal.                               |
+| `app/more/`     | Phone menu page: links to Opening hours, Payments, Your plan and Sign out. |
 | `app/setup/`    | Creates the business after a new owner confirms their email.              |
 
 ## Upload layout
