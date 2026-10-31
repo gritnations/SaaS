@@ -13,18 +13,21 @@ State transitions of a business's plan:
     * ``active`` + renewal failed -> ``past_due``; ``past_due`` + paid again -> ``active``.
     * any paid plan + subscription ended -> the free plan, ``active``. Online payments then stop counting.
     * a subscription set to cancel later keeps its plan; ``plan_ends_at`` records when it will end.
+    * the owner cancels from the Plan screen -> the unused days are refunded, the subscription ends at
+      once and the business moves to the free plan, ``active``.
 """
 
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import psycopg
 
 from booking.owner import PLAN_CURRENCY, PLAN_PRICES, InvalidChangeError
 from booking.service import NotFoundError
-from payments.base import PaymentEvent, SubscriptionBilling, SubscriptionOrder
+from payments.base import CancellationQuote, PaymentEvent, SubscriptionBilling, SubscriptionOrder
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -86,6 +89,30 @@ class BillingBackend(Protocol):
 
         Returns:
             The portal link.
+        """
+        ...
+
+    def cancel_quote(self, account: str, slug: str) -> CancellationQuote:
+        """See :meth:`BillingService.cancel_quote`.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            What cancelling now would refund.
+        """
+        ...
+
+    def cancel_plan(self, account: str, slug: str) -> CancellationQuote:
+        """See :meth:`BillingService.cancel_plan`.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            What was refunded.
         """
         ...
 
@@ -158,7 +185,7 @@ class BillingService:
         Raises:
             NotFoundError: If the account does not manage the business.
             InvalidChangeError: If the plan is not a paid plan, or the business already has one: plans are
-                changed or cancelled through the provider's portal.
+                changed through the provider's portal and cancelled with :meth:`cancel_plan`.
             payments.base.ProviderUnavailableError: If the provider could not be reached.
         """
         if plan not in PLAN_PRICES:
@@ -166,7 +193,7 @@ class BillingService:
         with self._database.connection() as connection:
             business = self._member(connection, account, slug)
         if business.plan != "free" or business.subscription_id is not None:
-            raise InvalidChangeError("Change or cancel your plan from Manage subscription.")
+            raise InvalidChangeError("Change your plan from Manage subscription, or cancel it on this screen.")
         plan_name, amount = PLAN_PRICES[plan]
         order = SubscriptionOrder(
             business_id=business.id,
@@ -203,6 +230,73 @@ class BillingService:
         if business.customer_id is None:
             raise InvalidChangeError("This business has no subscription to manage.")
         return self._provider.billing_portal_url(business.customer_id, f"{self._site_url}/#billing=portal")
+
+    def _paid(self, account: str, slug: str) -> tuple[str, str]:
+        """Find the subscription of a business the account manages that is on a paid plan.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            ``(business id, subscription)``.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+            InvalidChangeError: If the business has no paid plan.
+        """
+        with self._database.connection() as connection:
+            business = self._member(connection, account, slug)
+        if business.plan == "free" or business.subscription_id is None:
+            raise InvalidChangeError("This business has no paid plan to cancel.")
+        return business.id, business.subscription_id
+
+    def cancel_quote(self, account: str, slug: str) -> CancellationQuote:
+        """Show what cancelling the plan now would refund, without changing anything.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            The refund for the unused days of the paid period.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+            InvalidChangeError: If the business has no paid plan.
+            payments.base.ProviderUnavailableError: If the provider could not be reached.
+        """
+        _, subscription = self._paid(account, slug)
+        return self._provider.quote_cancellation(subscription, datetime.now(UTC))
+
+    def cancel_plan(self, account: str, slug: str) -> CancellationQuote:
+        """Cancel the paid plan at once, refund the unused days, and move the business to the free plan.
+
+        The provider refunds first; if that or the cancellation fails, the plan is left as it was and the
+        owner can try again. The provider's later notice that the subscription ended then matches nothing.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            What was refunded.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+            InvalidChangeError: If the business has no paid plan.
+            payments.base.ProviderUnavailableError: If the refund or the cancellation failed.
+        """
+        business_id, subscription = self._paid(account, slug)
+        refunded = self._provider.cancel_with_refund(subscription, datetime.now(UTC))
+        with self._database.connection() as connection:
+            connection.execute(
+                "UPDATE businesses SET plan = 'free', plan_status = 'active', billing_subscription_id = NULL, "
+                "plan_ends_at = NULL WHERE id = %s AND billing_subscription_id = %s",
+                (business_id, subscription),
+            )
+        LOGGER.info("plan cancelled with refund business=%s refund=%s", slug, refunded.refund_minor)
+        return refunded
 
     def record(self, event: PaymentEvent) -> bool:
         """Apply a verified subscription event to its business.

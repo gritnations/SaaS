@@ -23,7 +23,7 @@ from api.main import create_api
 from booking.owner import InvalidChangeError, Membership, NewBusiness
 from booking.service import NotFoundError
 from main import create_app
-from payments.base import PaymentEvent, ProviderUnavailableError
+from payments.base import CancellationQuote, PaymentEvent, ProviderUnavailableError
 
 ENV = {
     "STRIPE_SECRET_KEY": "sk_test_placeholder",
@@ -108,6 +108,32 @@ class FakeBilling:
         self._record("portal", account, slug)
         return "https://billing.stripe.com/p/session/test"
 
+    def cancel_quote(self, account: str, slug: str) -> CancellationQuote:
+        """Answer with what a cancellation would refund.
+
+        Args:
+            account: The account.
+            slug: The business.
+
+        Returns:
+            The quote.
+        """
+        self._record("cancel_quote", account, slug)
+        return CancellationQuote(450, "GBP", 15)
+
+    def cancel_plan(self, account: str, slug: str) -> CancellationQuote:
+        """Answer with what the cancellation refunded.
+
+        Args:
+            account: The account.
+            slug: The business.
+
+        Returns:
+            The refund made.
+        """
+        self._record("cancel_plan", account, slug)
+        return CancellationQuote(450, "GBP", 15)
+
     def record(self, event: PaymentEvent) -> bool:
         """Record the event.
 
@@ -174,6 +200,47 @@ def test_the_plan_routes_need_sign_in() -> None:
     assert api.post("/owner/businesses/fade/billing/upgrade", json={"plan": "starter"}).status_code == 401
     assert api.post("/owner/businesses/fade/billing/portal").status_code == 401
     assert billing.calls == []
+
+
+def test_cancelling_a_plan_needs_sign_in_and_takes_no_amount() -> None:
+    """Without a token nothing reaches billing; the refund is worked out on the server, never sent."""
+    billing = FakeBilling()
+    api = client(billing)
+    assert api.get("/owner/businesses/fade/billing/cancel-quote").status_code == 401
+    assert api.post("/owner/businesses/fade/billing/cancel").status_code == 401
+    assert billing.calls == []
+    response = api.post("/owner/businesses/fade/billing/cancel", headers=GOOD, json={"refund_minor": 99999})
+    assert response.status_code == 200 and response.json()["refund_minor"] == 450
+    assert billing.calls == [("cancel_plan", (ACCOUNT, "fade"))]
+
+
+def test_the_cancel_quote_and_the_cancellation_answer_from_the_billing_service() -> None:
+    """The quote shows the refund and unused days; cancelling answers with the refund made."""
+    billing = FakeBilling()
+    api = client(billing)
+    expected = {"refund_minor": 450, "currency": "GBP", "unused_days": 15}
+    assert api.get("/owner/businesses/fade/billing/cancel-quote", headers=GOOD).json() == expected
+    assert api.post("/owner/businesses/fade/billing/cancel", headers=GOOD).json() == expected
+    assert billing.calls == [("cancel_quote", (ACCOUNT, "fade")), ("cancel_plan", (ACCOUNT, "fade"))]
+
+
+@pytest.mark.parametrize("path", ["get:/cancel-quote", "post:/cancel"])
+def test_cancel_outcomes_map_to_answers_and_hide_provider_detail(path: str) -> None:
+    """Another owner's business is 404, no paid plan is 422, a provider failure is 503 without Stripe's wording."""
+    method, route = path.split(":")
+    for failure, status in [
+        (NotFoundError("Business not found."), 404),
+        (InvalidChangeError("This business has no paid plan to cancel."), 422),
+        (ProviderUnavailableError("Stripe could not refund."), 503),
+    ]:
+        response = getattr(client(FakeBilling(failure)), method)(f"/owner/businesses/fade/billing{route}", headers=GOOD)
+        assert response.status_code == status
+        assert "Stripe could not" not in response.text
+
+
+def test_without_billing_cancelling_is_unavailable() -> None:
+    """With no billing service the cancel routes answer 503."""
+    assert client(None).post("/owner/businesses/fade/billing/cancel", headers=GOOD).status_code == 503
 
 
 def test_upgrade_and_portal_answer_from_the_billing_service() -> None:

@@ -141,6 +141,21 @@ class SubscriptionOrder:
     cancel_url: str
 
 
+@dataclass(frozen=True)
+class CancellationQuote:
+    """What cancelling a business's plan now refunds. Worked out on the server; a browser never sends it.
+
+    Attributes:
+        refund_minor: The refund in minor units, ``0`` when nothing is owed.
+        currency: Upper-case ISO 4217 code.
+        unused_days: Whole days of the paid period that are not used, for showing to the owner.
+    """
+
+    refund_minor: int
+    currency: str
+    unused_days: int
+
+
 @runtime_checkable
 class SubscriptionBilling(Protocol):
     """A provider through which the platform bills businesses for their plan.
@@ -179,6 +194,41 @@ class SubscriptionBilling(Protocol):
 
         Raises:
             ProviderUnavailableError: If the provider could not create it.
+        """
+        ...
+
+    def quote_cancellation(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Work out what cancelling the subscription at ``now`` would refund, without changing anything.
+
+        The refund is the unused share of the last paid period, rounded down and never more than was paid.
+
+        Args:
+            subscription_id: The business's subscription.
+            now: The moment of cancellation.
+
+        Returns:
+            The quote.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not be asked.
+        """
+        ...
+
+    def cancel_with_refund(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Refund the unused part of the last paid period, then cancel the subscription at once.
+
+        The refund is made first, so a failed refund never leaves a cancelled plan, and never twice for one
+        subscription: a retry after a failed cancel finds the refund already made.
+
+        Args:
+            subscription_id: The business's subscription.
+            now: The moment of cancellation.
+
+        Returns:
+            What was refunded.
+
+        Raises:
+            ProviderUnavailableError: If the refund or the cancellation failed.
         """
         ...
 
