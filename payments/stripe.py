@@ -25,12 +25,14 @@ never leave the server. Only test-mode keys are accepted until live payments are
 
 import logging
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import stripe
 
 from payments.base import (
+    CancellationQuote,
     CheckoutOrder,
     CheckoutSession,
     HostedCheckout,
@@ -77,6 +79,21 @@ def _text(value: object) -> str | None:
         The string, or ``None``.
     """
     return value if isinstance(value, str) and value else None
+
+
+@dataclass(frozen=True)
+class _LastPayment:
+    """What a business last paid for its plan, as read from Stripe for one cancellation.
+
+    Attributes:
+        ended: Whether Stripe has already ended the subscription.
+        quote: The refund for the unused share of the paid period.
+        target: The payment the refund is made against, or ``None`` when nothing is to be refunded.
+    """
+
+    ended: bool
+    quote: CancellationQuote
+    target: dict[str, str] | None
 
 
 class StripeProvider:
@@ -203,6 +220,149 @@ class StripeProvider:
         except stripe.StripeError as exc:
             raise self._unavailable("open billing portal", exc) from None
         return str(portal.url)
+
+    @staticmethod
+    def _text_id(value: object) -> str | None:
+        """Read an identifier that Stripe returns either as text or as an expanded object.
+
+        Args:
+            value: The field.
+
+        Returns:
+            The identifier, or ``None``.
+        """
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, Mapping):
+            return _text(value.get("id"))
+        return None
+
+    def _last_payment(self, subscription_id: str, now: datetime) -> _LastPayment:
+        """Read what the business last paid for its plan, and how much of that period is unused.
+
+        Args:
+            subscription_id: The business's subscription.
+            now: The moment of cancellation.
+
+        Returns:
+            The last payment, the share of it to refund and the payment to refund it from.
+
+        Raises:
+            ProviderUnavailableError: If Stripe refused or could not be reached.
+        """
+        try:
+            subscription: Any = self._client.v1.subscriptions.retrieve(
+                subscription_id, {"expand": ["latest_invoice.payments"]}
+            )
+        except stripe.StripeError as exc:
+            raise self._unavailable("read the subscription", exc) from None
+        invoice = subscription.get("latest_invoice")
+        invoice = invoice if isinstance(invoice, Mapping) else {}
+        currency = (_text(invoice.get("currency")) or "gbp").upper()
+        if subscription.get("status") == "canceled":
+            return _LastPayment(True, CancellationQuote(0, currency, 0), None)
+        paid = invoice.get("amount_paid") if invoice.get("status") == "paid" else 0
+        paid = paid if isinstance(paid, int) and paid > 0 else 0
+        data = (subscription.get("items") or {}).get("data") or [{}]
+        start, end = data[0].get("current_period_start"), data[0].get("current_period_end")
+        length = end - start if isinstance(start, int) and isinstance(end, int) else 0
+        remaining = min(max(end - int(now.timestamp()), 0), length) if length > 0 else 0
+        refund = paid * remaining // length if length > 0 else 0
+        return _LastPayment(
+            False,
+            CancellationQuote(refund, currency, remaining // 86400),
+            self._refund_target(invoice) if refund > 0 else None,
+        )
+
+    def _refund_target(self, invoice: Mapping[str, Any]) -> dict[str, str] | None:
+        """Find the payment on an invoice that a refund is made against.
+
+        Args:
+            invoice: The expanded latest invoice.
+
+        Returns:
+            ``{"payment_intent": id}`` or ``{"charge": id}``, or ``None`` when no paid payment is found.
+        """
+        for item in (invoice.get("payments") or {}).get("data") or []:
+            payment = item.get("payment") or {}
+            if item.get("status") != "paid":
+                continue
+            intent, charge = self._text_id(payment.get("payment_intent")), self._text_id(payment.get("charge"))
+            if payment.get("type") == "payment_intent" and intent:
+                return {"payment_intent": intent}
+            if payment.get("type") == "charge" and charge:
+                return {"charge": charge}
+        return None
+
+    def quote_cancellation(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Work out what cancelling now would refund, without changing anything.
+
+        Args:
+            subscription_id: The business's subscription.
+            now: The moment of cancellation.
+
+        Returns:
+            The quote.
+
+        Raises:
+            ProviderUnavailableError: If Stripe refused or could not be reached.
+        """
+        return self._last_payment(subscription_id, now).quote
+
+    def cancel_with_refund(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Refund the unused part of the last paid period, once, then cancel the subscription at once.
+
+        Args:
+            subscription_id: The business's subscription.
+            now: The moment of cancellation.
+
+        Returns:
+            What was refunded.
+
+        Raises:
+            ProviderUnavailableError: If the refund or the cancellation failed. A failed refund leaves the
+                subscription running; a failed cancellation after a refund can be retried safely.
+        """
+        last = self._last_payment(subscription_id, now)
+        if last.ended:
+            return last.quote
+        refunded = last.quote
+        if last.quote.refund_minor > 0:
+            if last.target is None:
+                LOGGER.error("stripe cancel found no paid payment to refund subscription=%s", subscription_id)
+                raise ProviderUnavailableError("Stripe could not find the payment to refund.")
+            refunded = self._refund_once(subscription_id, last)
+        try:
+            self._client.v1.subscriptions.cancel(subscription_id, {"prorate": False, "invoice_now": False})
+        except stripe.StripeError as exc:
+            raise self._unavailable("cancel the subscription", exc) from None
+        LOGGER.info("stripe plan cancelled subscription=%s refund=%s", subscription_id, refunded.refund_minor)
+        return refunded
+
+    def _refund_once(self, subscription_id: str, last: _LastPayment) -> CancellationQuote:
+        """Refund the quoted amount unless this subscription's cancellation refund already exists.
+
+        Args:
+            subscription_id: The business's subscription, recorded on the refund.
+            last: The last payment, with the payment to refund against.
+
+        Returns:
+            The refund, new or found.
+
+        Raises:
+            ProviderUnavailableError: If Stripe refused or could not be reached.
+        """
+        target = last.target or {}
+        try:
+            listing: Any = self._client.v1.refunds.list(cast(Any, {**target, "limit": 20}))
+            for existing in listing.get("data") or []:
+                if (existing.get("metadata") or {}).get("plan_cancel") == subscription_id:
+                    return CancellationQuote(int(existing["amount"]), last.quote.currency, last.quote.unused_days)
+            refund: Any = {**target, "amount": last.quote.refund_minor, "metadata": {"plan_cancel": subscription_id}}
+            self._client.v1.refunds.create(refund, {"idempotency_key": f"plan-cancel-{subscription_id}"})
+        except stripe.StripeError as exc:
+            raise self._unavailable("refund the plan", exc) from None
+        return last.quote
 
     def create_checkout(self, order_reference: str) -> CheckoutSession:
         """Refuse a checkout started from a bare order reference.

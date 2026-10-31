@@ -28,9 +28,16 @@ from booking.service import (
     TRIAL_DAYS,
     BookingRequest,
     BookingService,
+    NotFoundError,
     PaymentUnavailableError,
 )
-from payments.base import HostedCheckout, PaymentEvent, SubscriptionOrder
+from payments.base import (
+    CancellationQuote,
+    HostedCheckout,
+    PaymentEvent,
+    ProviderUnavailableError,
+    SubscriptionOrder,
+)
 from postgres import Database, DatabaseSettings
 
 URL_ENV = "BOOKING_TEST_DATABASE_URL"
@@ -47,11 +54,17 @@ class FakeBillingProvider:
         name: The provider name.
         live: Never live.
         orders: Every order received.
+        quote: What every cancellation refunds.
+        cancelled: The subscriptions cancelled.
+        fail: If set, a cancellation raises it.
     """
 
     name: str = "stripe"
     live: bool = False
     orders: list[SubscriptionOrder] = field(default_factory=list)
+    quote: CancellationQuote = CancellationQuote(450, "GBP", 15)
+    cancelled: list[str] = field(default_factory=list)
+    fail: Exception | None = None
 
     def start_subscription(self, order: SubscriptionOrder) -> HostedCheckout:
         """Record the order.
@@ -76,6 +89,36 @@ class FakeBillingProvider:
             The link.
         """
         return f"https://billing.example.com/{customer_id}"
+
+    def quote_cancellation(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Give the fixed quote.
+
+        Args:
+            subscription_id: The subscription.
+            now: Unused.
+
+        Returns:
+            The quote.
+        """
+        return self.quote
+
+    def cancel_with_refund(self, subscription_id: str, now: datetime) -> CancellationQuote:
+        """Record the cancellation, or raise the configured failure.
+
+        Args:
+            subscription_id: The subscription.
+            now: Unused.
+
+        Returns:
+            The refund made.
+
+        Raises:
+            Exception: The configured failure.
+        """
+        if self.fail is not None:
+            raise self.fail
+        self.cancelled.append(subscription_id)
+        return self.quote
 
 
 @dataclass
@@ -287,6 +330,51 @@ def test_a_matching_subscription_activates_the_plan_once(world: World) -> None:
     assert world.billing.portal(account, slug) == "https://billing.example.com/cus_test_1"
     with pytest.raises(InvalidChangeError):
         world.billing.upgrade(account, slug, "starter")
+
+
+def test_cancelling_a_paid_plan_refunds_and_moves_the_business_to_free(world: World) -> None:
+    """The owner sees the refund first; cancelling refunds through the provider, ends the plan at once and
+    clears the subscription, so the provider's later 'ended' notice changes nothing."""
+    account, slug, business_id = sign_up(world)
+    world.billing.record(event(business_id, "subscription_active", plan="pro"))
+    assert world.billing.cancel_quote(account, slug) == world.provider.quote
+    assert world.billing.cancel_plan(account, slug) == world.provider.quote
+    assert world.provider.cancelled == ["sub_test_1"]
+    assert plan_of(world, slug) == ("free", "active", "cus_test_1", None)
+    with world.database.connection() as connection:
+        row = connection.execute("SELECT plan_ends_at FROM businesses WHERE slug = %s", (slug,)).fetchone()
+    assert row is not None and row[0] is None
+    assert world.billing.record(event(business_id, "subscription_ended")) is False
+    with pytest.raises(InvalidChangeError):
+        world.billing.cancel_plan(account, slug)
+
+
+def test_only_the_owner_of_a_paid_plan_can_cancel_it(world: World) -> None:
+    """A free business has nothing to cancel; another account cannot reach the business; neither reaches Stripe."""
+    account, slug, business_id = sign_up(world)
+    with pytest.raises(InvalidChangeError):
+        world.billing.cancel_quote(account, slug)
+    with pytest.raises(InvalidChangeError):
+        world.billing.cancel_plan(account, slug)
+    world.billing.record(event(business_id, "subscription_active"))
+    with pytest.raises(NotFoundError):
+        world.billing.cancel_plan(str(uuid.uuid4()), slug)
+    with pytest.raises(NotFoundError):
+        world.billing.cancel_quote(str(uuid.uuid4()), slug)
+    assert world.provider.cancelled == [] and plan_of(world, slug)[:2] == ("starter", "active")
+
+
+def test_a_failed_cancellation_leaves_the_plan_unchanged(world: World) -> None:
+    """If the provider cannot refund or cancel, the business keeps its plan and subscription, and can retry."""
+    account, slug, business_id = sign_up(world)
+    world.billing.record(event(business_id, "subscription_active"))
+    world.provider.fail = ProviderUnavailableError("Stripe could not refund.")
+    with pytest.raises(ProviderUnavailableError):
+        world.billing.cancel_plan(account, slug)
+    assert plan_of(world, slug) == ("starter", "active", "cus_test_1", "sub_test_1")
+    world.provider.fail = None
+    world.billing.cancel_plan(account, slug)
+    assert plan_of(world, slug)[0] == "free"
 
 
 def test_renewal_failure_recovery_and_cancellation(world: World) -> None:

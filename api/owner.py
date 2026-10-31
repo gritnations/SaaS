@@ -827,6 +827,20 @@ class ConnectOut(BaseModel):
     url: str
 
 
+class CancelPlanOut(BaseModel):
+    """What cancelling a plan refunds, or refunded. Worked out on the server.
+
+    Attributes:
+        refund_minor: The refund in minor units, ``0`` when nothing is owed.
+        currency: Upper-case ISO 4217 code.
+        unused_days: Whole days of the paid period that are not used.
+    """
+
+    refund_minor: int
+    currency: str
+    unused_days: int
+
+
 def _membership_out(found: Membership) -> MembershipOut:
     """Convert a membership for the response.
 
@@ -1253,5 +1267,39 @@ def build_router(
         """
         found = require_billing()
         return ConnectOut(url=payment_answer(lambda: found.portal(who, business)))
+
+    @router.get("/businesses/{business}/billing/cancel-quote", response_model=CancelPlanOut)
+    def plan_cancel_quote(who: Account, business: Slug) -> CancelPlanOut:
+        """Show what cancelling the plan now would refund, without changing anything.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The refund and the unused days.
+        """
+        found = require_billing()
+        quote = payment_answer(lambda: found.cancel_quote(who, business))
+        return CancelPlanOut(refund_minor=quote.refund_minor, currency=quote.currency, unused_days=quote.unused_days)
+
+    @router.post("/businesses/{business}/billing/cancel", response_model=CancelPlanOut)
+    def plan_cancel(who: Account, business: Slug) -> CancelPlanOut:
+        """Cancel the paid plan at once, refund the unused days and move the business to the free plan.
+
+        The amount is worked out on the server; the request carries none.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            What was refunded.
+        """
+        found = require_billing()
+        refunded = payment_answer(lambda: found.cancel_plan(who, business))
+        return CancelPlanOut(
+            refund_minor=refunded.refund_minor, currency=refunded.currency, unused_days=refunded.unused_days
+        )
 
     return router
