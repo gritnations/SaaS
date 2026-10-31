@@ -29,6 +29,7 @@ from booking.billing import BillingBackend
 from booking.owner import (
     BUSINESS_TYPES,
     MAX_DAYS_PER_REQUEST,
+    REGIONS,
     SIGNUP_PLANS,
     ConflictError,
     HoursBlock,
@@ -251,6 +252,7 @@ class NewBusinessBody(BaseModel):
         owner_name: The owner's name. Private.
         plan: ``free``: every business starts free with a trial and upgrades later.
         contact_email: Where booking emails go. Optional.
+        region: Where the business is: sets its time zone and currency. Fixed after sign-up.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -261,6 +263,7 @@ class NewBusinessBody(BaseModel):
     owner_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
     plan: Annotated[str, StringConstraints(pattern="^(" + "|".join(SIGNUP_PLANS) + ")$")] = "free"
     contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
+    region: Annotated[str, StringConstraints(pattern="^(" + "|".join(REGIONS) + ")$")] = "uk"
 
     @field_validator("business_type_other", "contact_email")
     @classmethod
@@ -952,7 +955,13 @@ def build_router(
             The new membership, on the free plan with its trial.
         """
         new = NewBusiness(
-            body.name, body.business_type, body.business_type_other, body.owner_name, body.plan, body.contact_email
+            body.name,
+            body.business_type,
+            body.business_type_other,
+            body.owner_name,
+            body.plan,
+            body.contact_email,
+            body.region,
         )
         return _membership_out(answer(lambda: service().create_business(who, new)))
 

@@ -2,11 +2,11 @@
 // The details typed at sign-up travel with the login, so the form starts filled in. All text reaches the page
 // through textContent.
 
-import { say, setError } from "./auth.js";
+import { regionFromDevice, say, setError } from "./auth.js";
 import { owner, readSession, sessionEmail, toSignIn, useSession } from "./owner.js";
 
 const input = (id) => document.getElementById(id);
-const fields = ["company", "type", "other", "owner"];
+const fields = ["company", "type", "other", "region", "owner"];
 
 /**
  * Read the sign-up details saved with the login, from the session token's claims.
@@ -32,6 +32,7 @@ function validate() {
     company: input("company").value.trim() ? "" : "Enter your business name.",
     type: type ? "" : "Choose what your business does.",
     other: type === "other" && !input("other").value.trim() ? "Describe your business in a few words." : "",
+    region: input("region").value ? "" : "Choose where your business is.",
     owner: input("owner").value.trim() ? "" : "Enter your name.",
   };
   for (const id of fields) setError(id, errors[id]);
@@ -61,6 +62,7 @@ async function create(event) {
       owner_name: input("owner").value.trim(),
       plan: "free",
       contact_email: sessionEmail() || null,
+      region: input("region").value,
     },
   });
   if (result.status === 201 || result.status === 409) {
@@ -93,6 +95,7 @@ async function start() {
   input("company").value = meta.company_name || "";
   input("type").value = meta.business_type || "";
   input("other").value = meta.business_type_other || "";
+  input("region").value = ["uk", "ae", "sa", "qa"].includes(meta.region) ? meta.region : regionFromDevice();
   input("owner").value = meta.owner_name || "";
   input("other-wrap").hidden = input("type").value !== "other";
   input("type").addEventListener("change", () => {

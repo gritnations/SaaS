@@ -2,10 +2,20 @@
 // The confirmation link returns to the owner dashboard at the site root, which finishes setting up the
 // business from the details saved with the login. All text reaches the page through textContent.
 
-import { DASHBOARD, EMAIL, NOT_CONFIGURED, auth, openDashboard, passwordToggle, say, setError } from "./auth.js";
+import {
+  DASHBOARD,
+  EMAIL,
+  NOT_CONFIGURED,
+  auth,
+  openDashboard,
+  passwordToggle,
+  regionFromDevice,
+  say,
+  setError,
+} from "./auth.js";
 
 const form = document.getElementById("signup-form");
-const fields = ["company", "type", "other", "owner", "email", "password", "terms"];
+const fields = ["company", "type", "other", "region", "owner", "email", "password", "terms"];
 const input = (id) => document.getElementById(id);
 let lastEmail = "";
 let lastCompany = "";
@@ -22,6 +32,7 @@ function validate() {
     company: company ? "" : "Enter your business name. Customers see it on your booking page.",
     type: type ? "" : "Choose what your business does.",
     other: type === "other" && !other ? "Describe your business in a few words." : "",
+    region: input("region").value ? "" : "Choose where your business is.",
     owner: input("owner").value.trim() ? "" : "Enter your name.",
     email: EMAIL.test(input("email").value.trim()) ? "" : "Enter an email like name@example.com.",
     password: input("password").value.length >= 8 ? "" : "Your password needs at least 8 characters.",
@@ -87,6 +98,7 @@ async function submit(event) {
       business_type: type,
       business_type_other: type === "other" ? input("other").value.trim() : "",
       company_name: lastCompany,
+      region: input("region").value,
       owner_name: input("owner").value.trim(),
     },
   });
@@ -138,6 +150,7 @@ async function resend() {
 input("type").addEventListener("change", () => {
   input("other-wrap").hidden = input("type").value !== "other";
 });
+input("region").value = regionFromDevice();
 input("password").addEventListener("input", showStrength);
 passwordToggle("pw-toggle", "password");
 input("resend").addEventListener("click", resend);

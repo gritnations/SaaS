@@ -163,6 +163,20 @@ def sign_up(world: World) -> tuple[str, str, str]:
     return account, made.slug, row[0]
 
 
+def test_a_plan_is_billed_in_pounds_for_a_business_outside_the_uk(world: World) -> None:
+    """Plan prices are set in pounds only, so a Saudi business is billed in pounds, not riyals."""
+    account = str(uuid.uuid4())
+    made = world.owners.create_business(
+        account,
+        NewBusiness(
+            f"Plantest {secrets.token_hex(3)}", "salon", None, "Sample Owner", "free", "owner@example.com", "sa"
+        ),
+    )
+    world.billing.upgrade(account, made.slug, "starter")
+    order = world.provider.orders[-1]
+    assert (order.amount_minor, order.currency) == (900, "GBP")
+
+
 def plan_of(world: World, slug: str) -> tuple[str, str, str | None, str | None]:
     """Read a business's plan fields.
 

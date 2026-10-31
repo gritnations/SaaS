@@ -1,7 +1,7 @@
 """Tests for the create-business route used by self sign-up. A fake owner service stands in for the database.
 
 What these tests establish: the route needs a valid sign-in, validates every field before the service is
-called, offers only the listed business types and the free plan, and maps outcomes to answers. Database
+called, offers only the listed business types, regions and the free plan, and maps outcomes to answers. Database
 behaviour is covered by ``test_signup_postgres.py``.
 """
 
@@ -62,12 +62,22 @@ def test_a_valid_sign_up_creates_the_business() -> None:
         "plan_ends_at": None,
     }
     new = owners.calls[0][1][1]
-    assert (new.name, new.business_type, new.business_type_other, new.plan) == (
+    assert (new.name, new.business_type, new.business_type_other, new.plan, new.region) == (
         "Fade & Co Barbers",
         "barbershop",
         None,
         "free",
+        "uk",
     )
+
+
+@pytest.mark.parametrize("region", ["uk", "ae", "sa", "qa"])
+def test_the_chosen_region_reaches_the_service(region: str) -> None:
+    """Each offered region is passed on as given."""
+    owners = FakeOwners()
+    response = signed_in(owners).post("/owner/businesses", headers=GOOD, json={**VALID, "region": region})
+    assert response.status_code == 201
+    assert owners.calls[0][1][1].region == region
 
 
 @pytest.mark.parametrize(
@@ -83,10 +93,16 @@ def test_a_valid_sign_up_creates_the_business() -> None:
         {"contact_email": "not-an-email"},
         {"business_type_other": "x" * 61},
         {"slug": "chosen-by-client"},
+        {"region": "mars"},
+        {"region": "UK"},
+        {"region": ""},
+        {"time_zone": "Asia/Riyadh"},
+        {"currency": "SAR"},
     ],
 )
 def test_invalid_sign_ups_are_rejected_before_the_service(change: dict[str, Any]) -> None:
-    """Paid or unknown plans, unknown types, bad names or email, or a client-chosen slug are refused."""
+    """Paid or unknown plans, unknown types or regions, bad names or email, or a client-chosen slug, zone or
+    currency are refused."""
     owners = FakeOwners()
     response = signed_in(owners).post("/owner/businesses", headers=GOOD, json={**VALID, **change})
     assert response.status_code == 422

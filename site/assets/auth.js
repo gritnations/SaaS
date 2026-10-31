@@ -55,6 +55,25 @@ export function setError(id, message) {
 }
 
 /**
+ * The region each sign-up time zone belongs to. Matches the regions the server offers.
+ * Provisional: the region list may change; update this map with it.
+ */
+const ZONE_REGIONS = { "Europe/London": "uk", "Asia/Dubai": "ae", "Asia/Riyadh": "sa", "Asia/Qatar": "qa" };
+
+/**
+ * Guess the business's region from this device's time zone, to pre-select it. The owner confirms it.
+ * Nothing is sent anywhere and no permission is asked.
+ * @returns {string} The region, or "" when the device's time zone is not one of the regions.
+ */
+export function regionFromDevice() {
+  try {
+    return ZONE_REGIONS[Intl.DateTimeFormat().resolvedOptions().timeZone] || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Show a message in a box, or hide the box.
  * @param {string} id The box id.
  * @param {string} message The message, or "".

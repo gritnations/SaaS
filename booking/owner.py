@@ -61,6 +61,21 @@ PLAN_PRICES = {"starter": ("Starter", 900), "pro": ("Pro", 2900)}
 """``plan -> (display name, monthly price in pence)`` for the paid plans. Test placeholders until the real
 plans and prices are decided. Every paid plan currently includes the same features as the free plan."""
 
+PLAN_CURRENCY = "GBP"
+"""The currency plans are billed in, whatever the business's own currency: prices are set in pounds only.
+Provisional: may change once plan pricing for other regions is decided."""
+
+REGIONS = {
+    "uk": ("Europe/London", "GBP"),
+    "ae": ("Asia/Dubai", "AED"),
+    "sa": ("Asia/Riyadh", "SAR"),
+    "qa": ("Asia/Qatar", "QAR"),
+}
+"""``region -> (IANA time zone, ISO 4217 currency)`` a business can be set up in. Both are fixed at sign-up:
+bookings store amounts without a currency, and payments are checked against the business's currency, so
+changing either later needs a planned move-over. Provisional: the list of regions may change; keep it in
+step with ``NewBusinessBody.region`` in ``api/owner.py`` and the region choices on the sign-up and set-up pages."""
+
 DEFAULT_HOURS = [(weekday, time(9, 0), time(17, 0)) for weekday in range(1, 6)]
 """Monday to Friday, 09:00 to 17:00, for a new business."""
 
@@ -127,6 +142,7 @@ class NewBusiness:
         owner_name: The owner's name. Private.
         plan: One of :data:`SIGNUP_PLANS`.
         contact_email: Where booking emails go, or ``None``.
+        region: One of :data:`REGIONS`; sets the business's time zone and currency.
     """
 
     name: str
@@ -135,6 +151,7 @@ class NewBusiness:
     owner_name: str
     plan: str
     contact_email: str | None
+    region: str = "uk"
 
 
 @dataclass(frozen=True)
@@ -331,6 +348,9 @@ class OwnerService:
         """
         if new.business_type not in BUSINESS_TYPES or new.plan not in SIGNUP_PLANS:
             raise InvalidChangeError("That business type or plan is not available.")
+        if new.region not in REGIONS:
+            raise InvalidChangeError("That region is not available.")
+        time_zone, currency = REGIONS[new.region]
         if (new.business_type == "other") != bool(new.business_type_other):
             raise InvalidChangeError("Describe the business when its type is other.")
         base = slugify(new.name)
@@ -352,7 +372,8 @@ class OwnerService:
                     counter += 1
                 row: Any = connection.execute(
                     "INSERT INTO businesses (slug, name, business_type, business_type_other, plan, contact_email, "
-                    "trial_ends_at) VALUES (%s, %s, %s, %s, %s, %s, now() + make_interval(days => %s)) "
+                    "time_zone, currency, trial_ends_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now() + make_interval(days => %s)) "
                     "RETURNING id::text, trial_ends_at",
                     (
                         slug,
@@ -361,6 +382,8 @@ class OwnerService:
                         new.business_type_other,
                         new.plan,
                         new.contact_email,
+                        time_zone,
+                        currency,
                         TRIAL_DAYS,
                     ),
                 ).fetchone()
