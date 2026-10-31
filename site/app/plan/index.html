@@ -30,7 +30,19 @@
         <span class="eyebrow">Current plan</span>
         <h2 id="now-h">…</h2>
         <p class="muted" id="now-note"></p>
-        <button class="btn ghost" type="button" id="manage" hidden>Manage subscription</button>
+        <div class="row">
+          <button class="btn ghost" type="button" id="manage" hidden>Manage subscription</button>
+          <button class="btn ghost" type="button" id="cancel-plan" hidden>Cancel plan</button>
+        </div>
+      </section>
+
+      <section class="panel" id="cancel-box" aria-labelledby="cancel-h" hidden>
+        <h2 id="cancel-h">Cancel your plan?</h2>
+        <p id="cancel-text"></p>
+        <div class="row">
+          <button class="btn" type="button" id="cancel-confirm">Cancel plan</button>
+          <button class="btn ghost" type="button" id="cancel-keep">Keep my plan</button>
+        </div>
       </section>
 
       <section class="plans" id="plans" aria-label="Choose a plan" hidden>
