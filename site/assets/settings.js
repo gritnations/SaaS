@@ -7,12 +7,22 @@ const input = (id) => document.getElementById(id);
 let slug = "";
 
 /**
+ * Read a box as a number. An empty box is not a number: Number("") would give 0.
+ * @param {string} id The field id.
+ * @returns {number} The number, or NaN.
+ */
+function numberIn(id) {
+  const text = input(id).value.trim();
+  return text === "" ? NaN : Number(text);
+}
+
+/**
  * Read a number of hours as minutes.
  * @param {string} id The field id.
  * @returns {number} The minutes, or NaN.
  */
 function hoursToMinutes(id) {
-  const value = Number(input(id).value);
+  const value = numberIn(id);
   return Number.isFinite(value) ? Math.round(value * 60) : NaN;
 }
 
@@ -57,8 +67,8 @@ async function save(event) {
     public_phone: input("s-phone").value.trim(),
     public_email: input("s-email").value.trim(),
     notice_minutes: hoursToMinutes("s-notice"),
-    window_days: Number(input("s-window").value),
-    break_minutes: Number(input("s-break").value),
+    window_days: numberIn("s-window"),
+    break_minutes: numberIn("s-break"),
     cancel_cutoff_minutes: hoursToMinutes("s-cancel"),
     move_cutoff_minutes: hoursToMinutes("s-move"),
   };
