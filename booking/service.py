@@ -116,10 +116,12 @@ class Business:
         trial_ends_at: When the business's trial ends, or ``None``.
         pay_online: The business offers online payment.
         pay_at_venue: The business offers payment at the venue.
-        payment_options: How paid services can be paid now, filled in by :meth:`BookingService.list_services`.
         public_address: Address shown to customers, or ``None``.
         public_phone: Phone shown to customers, or ``None``.
         public_email: Email shown to customers, or ``None``.
+        payment_options: How paid services can be paid now, filled in by :meth:`BookingService.list_services`.
+            It must stay the last field: a business is loaded from a database row by position, and this
+            field is never part of the row.
     """
 
     id: str
@@ -136,10 +138,10 @@ class Business:
     trial_ends_at: datetime | None = None
     pay_online: bool = False
     pay_at_venue: bool = True
-    payment_options: tuple[str, ...] = ()
     public_address: str | None = None
     public_phone: str | None = None
     public_email: str | None = None
+    payment_options: tuple[str, ...] = ()
 
     @property
     def zone(self) -> ZoneInfo:

@@ -152,6 +152,29 @@ def test_owner_changes_show_on_the_public_side(pair: Pair) -> None:
     assert [slot.time for slot in days[0].slots] == ["09:00"]
 
 
+def test_contact_details_saved_by_an_owner_reach_customers_in_the_same_fields(pair: Pair) -> None:
+    """Address, phone and email saved in settings come back from the public side, each in its own field."""
+    pair.owners.update_settings(
+        pair.owner_a,
+        pair.a,
+        {
+            "public_address": "1 High Street, London",
+            "public_phone": "020 7946 0000",
+            "public_email": "hello@example.com",
+        },
+    )
+    business, _ = pair.bookings.list_services(pair.a)
+    assert business.public_address == "1 High Street, London"
+    assert business.public_phone == "020 7946 0000"
+    assert business.public_email == "hello@example.com"
+    assert business.payment_options == ("venue",)
+    pair.owners.update_settings(
+        pair.owner_a, pair.a, {"public_address": None, "public_phone": None, "public_email": None}
+    )
+    business, _ = pair.bookings.list_services(pair.a)
+    assert (business.public_address, business.public_phone, business.public_email) == (None, None, None)
+
+
 def test_duplicate_service_identifiers_are_a_conflict(pair: Pair) -> None:
     """A second service with an existing slug is refused."""
     with pytest.raises(ConflictError):
