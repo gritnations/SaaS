@@ -6,6 +6,14 @@ import { notice, owner, startOwnerPage } from "./owner.js";
 const input = (id) => document.getElementById(id);
 let slug = "";
 
+/** Where each time zone a business can be set up in is, as shown in Settings. */
+const ZONE_NAMES = {
+  "Europe/London": "United Kingdom",
+  "Asia/Dubai": "United Arab Emirates",
+  "Asia/Riyadh": "Saudi Arabia",
+  "Asia/Qatar": "Qatar",
+};
+
 /**
  * Read a box as a number. An empty box is not a number: Number("") would give 0.
  * @param {string} id The field id.
@@ -40,6 +48,9 @@ function minutesToHours(minutes) {
  * @param {object} s The settings.
  */
 function fillForm(s) {
+  const place = ZONE_NAMES[s.time_zone] || s.time_zone;
+  input("s-region").textContent =
+    `${place}: times in ${s.time_zone.split("/").pop().replaceAll("_", " ")} time, prices in ${s.currency}. Set when your business was created.`;
   input("s-name").value = s.name || "";
   input("s-contact").value = s.contact_email || "";
   input("s-meeting").value = s.meeting_link || "";

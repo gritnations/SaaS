@@ -63,6 +63,21 @@
               <span class="error" id="other-err" hidden></span>
             </label>
 
+            <label class="field" for="region"
+              >Where is your business?
+              <select id="region" required>
+                <option value="">Choose one</option>
+                <option value="uk">United Kingdom</option>
+                <option value="ae">United Arab Emirates</option>
+                <option value="sa">Saudi Arabia</option>
+                <option value="qa">Qatar</option>
+              </select>
+              <span class="small muted"
+                >Sets your booking times and prices to local time and currency. It can't be changed later.</span
+              >
+              <span class="error" id="region-err" hidden></span>
+            </label>
+
             <label class="field" for="owner"
               >Your name
               <input id="owner" type="text" autocomplete="name" maxlength="100" required />

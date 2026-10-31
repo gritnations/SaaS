@@ -22,7 +22,7 @@ from typing import Any, Protocol
 
 import psycopg
 
-from booking.owner import PLAN_PRICES, InvalidChangeError
+from booking.owner import PLAN_CURRENCY, PLAN_PRICES, InvalidChangeError
 from booking.service import NotFoundError
 from payments.base import PaymentEvent, SubscriptionBilling, SubscriptionOrder
 from postgres import Database
@@ -173,7 +173,7 @@ class BillingService:
             plan=plan,
             plan_name=plan_name,
             amount_minor=amount,
-            currency=business.currency,
+            currency=PLAN_CURRENCY,
             customer_email=business.contact_email,
             customer_id=business.customer_id,
             success_url=f"{self._site_url}/#billing=done",

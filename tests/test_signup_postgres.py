@@ -4,7 +4,8 @@ Skipped unless ``BOOKING_TEST_DATABASE_URL`` is set. The database must have ever
 Each test uses fresh account identifiers and deletes every business it created.
 
 What these tests establish: a new business gets its defaults and a unique slug, an account can have only
-one business, the owner sees only their own business, and customers can book the new business at once.
+one business, the owner sees only their own business, customers can book the new business at once, and a
+business outside the UK gets its own time zone and currency, with its opening hours read in that zone.
 """
 
 import os
@@ -12,6 +13,7 @@ import secrets
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -46,18 +48,19 @@ def database() -> Iterator[Database]:
         db.close()
 
 
-def new(name: str, business_type: str = "barbershop", other: str | None = None) -> NewBusiness:
+def new(name: str, business_type: str = "barbershop", other: str | None = None, region: str = "uk") -> NewBusiness:
     """Build sign-up details.
 
     Args:
         name: Company name.
         business_type: Type.
         other: Description for ``other``.
+        region: Where the business is.
 
     Returns:
         The details.
     """
-    return NewBusiness(name, business_type, other, "Sample Owner", "free", "owner@example.com")
+    return NewBusiness(name, business_type, other, "Sample Owner", "free", "owner@example.com", region)
 
 
 def test_a_new_business_gets_its_defaults(database: Database) -> None:
@@ -126,6 +129,51 @@ def test_owners_are_isolated_and_customers_can_book_at_once(database: Database) 
     )
     _, listed = owners.bookings(account, made.slug, day, 1)
     assert [b.reference for b in listed] == [confirmed.reference]
+
+
+def test_a_business_outside_the_uk_gets_its_own_zone_and_currency(database: Database) -> None:
+    """A Saudi business is in Riyadh time and riyals, and a 10:00 booking there is 10:00 Riyadh time."""
+    owners = OwnerService(database)
+    account = str(uuid.uuid4())
+    made = owners.create_business(
+        account, new(f"Signup Test {secrets.token_hex(3)} Advisory", "other", "Advisory", "sa")
+    )
+    settings = owners.settings(account, made.slug)
+    assert (settings.time_zone, settings.currency) == ("Asia/Riyadh", "SAR")
+    bookings = BookingService(database)
+    business, _ = bookings.list_services(made.slug)
+    assert (business.time_zone, business.currency) == ("Asia/Riyadh", "SAR")
+    riyadh = ZoneInfo("Asia/Riyadh")
+    day = datetime.now(riyadh).date() + timedelta(days=7)
+    while day.weekday() > 4:
+        day += timedelta(days=1)
+    bookings.create_booking(
+        made.slug, BookingRequest("intro", day, "10:00", "Test Customer", "customer@example.com", None, None)
+    )
+    _, [listed] = owners.bookings(account, made.slug, day, 1)
+    assert listed.starts_at == datetime(day.year, day.month, day.day, 10, 0, tzinfo=riyadh)
+    assert listed.starts_at.astimezone(UTC).hour == 7
+
+
+def test_each_region_sets_its_zone_and_currency_and_an_unknown_one_is_refused(database: Database) -> None:
+    """UK, UAE, Saudi Arabia and Qatar each get their own pair; anything else creates nothing."""
+    owners = OwnerService(database)
+    tag = secrets.token_hex(3)
+    expected = {
+        "uk": ("Europe/London", "GBP"),
+        "ae": ("Asia/Dubai", "AED"),
+        "sa": ("Asia/Riyadh", "SAR"),
+        "qa": ("Asia/Qatar", "QAR"),
+    }
+    for region, pair in expected.items():
+        account = str(uuid.uuid4())
+        made = owners.create_business(account, new(f"Signup Test {tag} {region}", region=region))
+        settings = owners.settings(account, made.slug)
+        assert (settings.time_zone, settings.currency) == pair
+    account = str(uuid.uuid4())
+    with pytest.raises(InvalidChangeError):
+        owners.create_business(account, new(f"Signup Test {tag} Nowhere", region="mars"))
+    assert owners.memberships(account) == []
 
 
 @pytest.mark.parametrize(
