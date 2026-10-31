@@ -170,7 +170,12 @@ export function describePlan(b) {
     };
   }
   if (b.plan_ends_at) {
-    const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long" }).format(new Date(b.plan_ends_at));
+    // The business's own time zone, so the day matches where the business is, not where the viewer is.
+    const day = new Intl.DateTimeFormat("en-GB", {
+      timeZone: b.time_zone || "Europe/London",
+      day: "numeric",
+      month: "long",
+    }).format(new Date(b.plan_ends_at));
     return { name, note: `Cancelled. You keep it until ${day}, then move to Free.`, fraction: 1, trialLeft };
   }
   if (b.plan === "free") {

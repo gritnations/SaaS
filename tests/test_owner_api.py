@@ -125,7 +125,7 @@ class FakeOwners:
             The membership.
         """
         self._record("memberships", account)
-        return [Membership("example", "Example Advisory", "owner")]
+        return [Membership("example", "Example Advisory", "owner", time_zone="Asia/Riyadh")]
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """Return one booking.
@@ -333,7 +333,7 @@ def test_owner_routes_answer_503_when_sign_in_is_not_configured() -> None:
 
 
 def test_me_lists_the_accounts_businesses() -> None:
-    """The verified account's memberships come back, and the service saw that account."""
+    """The verified account's memberships come back with each business's time zone; the service saw that account."""
     owners = FakeOwners()
     response = signed_in(owners).get("/owner/me", headers=GOOD)
     assert response.status_code == 200
@@ -349,6 +349,7 @@ def test_me_lists_the_accounts_businesses() -> None:
                 "trial_ends_at": None,
                 "online_payments": False,
                 "plan_ends_at": None,
+                "time_zone": "Asia/Riyadh",
             }
         ]
     }
