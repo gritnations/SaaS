@@ -32,6 +32,19 @@ assets/config.js                              made from site/assets/config.examp
 
 Keep the staging site's own `.htaccess` (password protection) and `.htpasswd`.
 
+### Stamp a version before uploading
+
+Browsers keep their own copy of scripts and stylesheets. Without a new address for each upload, a browser can run an
+old script against a new page and stop with a half-drawn screen. Stamp a version onto the upload folder, never onto
+the files in the repository:
+
+```bash
+node site/stamp-version.mjs <upload-folder> <version>   # for example the short commit id: 1afb199
+```
+
+It adds `?v=<version>` to every script and stylesheet link in the pages and to every import between scripts, and
+replaces an earlier version if there is one. Use a new version for every upload.
+
 ## How the site root forwards links
 
 | Arrives with                                          | Goes to                                     |
