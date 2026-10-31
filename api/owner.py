@@ -229,6 +229,7 @@ class MembershipOut(BaseModel):
         trial_ends_at: When the trial ends, ISO 8601, or ``None``.
         online_payments: The plan, or the trial, includes online payments now.
         plan_ends_at: When a cancelled paid plan ends, ISO 8601, or ``None``.
+        time_zone: The business's IANA time zone, for showing its dates.
     """
 
     slug: str
@@ -240,6 +241,7 @@ class MembershipOut(BaseModel):
     trial_ends_at: str | None = None
     online_payments: bool = False
     plan_ends_at: str | None = None
+    time_zone: str = "Europe/London"
 
 
 class NewBusinessBody(BaseModel):
@@ -844,6 +846,7 @@ def _membership_out(found: Membership) -> MembershipOut:
         trial_ends_at=found.trial_ends_at.isoformat() if found.trial_ends_at else None,
         online_payments=found.online_payments,
         plan_ends_at=found.plan_ends_at.isoformat() if found.plan_ends_at else None,
+        time_zone=found.time_zone,
     )
 
 

@@ -138,6 +138,8 @@ def test_a_business_outside_the_uk_gets_its_own_zone_and_currency(database: Data
     made = owners.create_business(
         account, new(f"Signup Test {secrets.token_hex(3)} Advisory", "other", "Advisory", "sa")
     )
+    assert made.time_zone == "Asia/Riyadh"
+    assert [m.time_zone for m in owners.memberships(account)] == ["Asia/Riyadh"]
     settings = owners.settings(account, made.slug)
     assert (settings.time_zone, settings.currency) == ("Asia/Riyadh", "SAR")
     bookings = BookingService(database)

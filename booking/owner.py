@@ -118,6 +118,7 @@ class Membership:
         trial_ends_at: When the business's trial ends, or ``None``.
         online_payments: The plan, or the trial, includes online payments now.
         plan_ends_at: When a cancelled paid plan ends, or ``None``.
+        time_zone: The business's IANA time zone, which the owner screens show its dates in.
     """
 
     slug: str
@@ -129,6 +130,7 @@ class Membership:
     trial_ends_at: datetime | None = None
     online_payments: bool = False
     plan_ends_at: datetime | None = None
+    time_zone: str = "Europe/London"
 
 
 @dataclass(frozen=True)
@@ -317,14 +319,15 @@ class OwnerService:
         """
         with self._database.connection() as connection:
             rows = connection.execute(
-                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status, b.trial_ends_at, b.plan_ends_at "
+                "SELECT b.slug, b.name, m.role, m.display_name, b.plan, b.plan_status, b.trial_ends_at, b.plan_ends_at, "
+                "b.time_zone "
                 "FROM business_members m JOIN businesses b ON b.id = m.business_id "
                 "WHERE m.user_id = %s ORDER BY b.name",
                 (account,),
             ).fetchall()
         now = datetime.now(UTC)
         return [
-            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now), r[7])
+            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now), r[7], r[8])
             for r in rows
         ]
 
@@ -332,8 +335,8 @@ class OwnerService:
         """Create the account's business with sensible defaults, in one transaction.
 
         The business gets a unique slug from its name, Monday to Friday 09:00 to 17:00, one free 30-minute
-        service, GBP and UK time (the table defaults), payment at the venue, the account as its owner, the
-        free plan and a :data:`booking.service.TRIAL_DAYS`-day trial of the paid features.
+        service, the time zone and currency of the chosen region, payment at the venue, the account as its owner,
+        the free plan and a :data:`booking.service.TRIAL_DAYS`-day trial of the paid features.
 
         Args:
             account: The verified account identifier.
@@ -406,7 +409,9 @@ class OwnerService:
                     )
         except errors.UniqueViolation:
             raise ConflictError("This account already has a business.") from None
-        return Membership(slug, new.name, "owner", new.owner_name, new.plan, "active", trial_ends_at, True)
+        return Membership(
+            slug, new.name, "owner", new.owner_name, new.plan, "active", trial_ends_at, True, time_zone=time_zone
+        )
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """List bookings that start within a run of local days, with customer details.
