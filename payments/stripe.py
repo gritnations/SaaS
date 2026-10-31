@@ -233,9 +233,7 @@ class StripeProvider:
         """
         if isinstance(value, str) and value:
             return value
-        if isinstance(value, Mapping):
-            return _text(value.get("id"))
-        return None
+        return _text(getattr(value, "id", None))
 
     def _last_payment(self, subscription_id: str, now: datetime) -> _LastPayment:
         """Read what the business last paid for its plan, and how much of that period is unused.
@@ -256,25 +254,27 @@ class StripeProvider:
             )
         except stripe.StripeError as exc:
             raise self._unavailable("read the subscription", exc) from None
-        invoice = subscription.get("latest_invoice")
-        invoice = invoice if isinstance(invoice, Mapping) else {}
-        currency = (_text(invoice.get("currency")) or "gbp").upper()
-        if subscription.get("status") == "canceled":
+        invoice = getattr(subscription, "latest_invoice", None)
+        currency = (_text(getattr(invoice, "currency", None)) or "gbp").upper()
+        if getattr(subscription, "status", None) == "canceled":
             return _LastPayment(True, CancellationQuote(0, currency, 0), None)
-        paid = invoice.get("amount_paid") if invoice.get("status") == "paid" else 0
+        paid = getattr(invoice, "amount_paid", 0) if getattr(invoice, "status", None) == "paid" else 0
         paid = paid if isinstance(paid, int) and paid > 0 else 0
-        data = (subscription.get("items") or {}).get("data") or [{}]
-        start, end = data[0].get("current_period_start"), data[0].get("current_period_end")
-        length = end - start if isinstance(start, int) and isinstance(end, int) else 0
-        remaining = min(max(end - int(now.timestamp()), 0), length) if length > 0 else 0
-        refund = paid * remaining // length if length > 0 else 0
+        periods = getattr(getattr(subscription, "items", None), "data", None) or [None]
+        start, end = getattr(periods[0], "current_period_start", None), getattr(periods[0], "current_period_end", None)
+        if isinstance(start, int) and isinstance(end, int) and end > start:
+            length = end - start
+            remaining = min(max(end - int(now.timestamp()), 0), length)
+            refund = paid * remaining // length
+        else:
+            length = remaining = refund = 0
         return _LastPayment(
             False,
             CancellationQuote(refund, currency, remaining // 86400),
             self._refund_target(invoice) if refund > 0 else None,
         )
 
-    def _refund_target(self, invoice: Mapping[str, Any]) -> dict[str, str] | None:
+    def _refund_target(self, invoice: object) -> dict[str, str] | None:
         """Find the payment on an invoice that a refund is made against.
 
         Args:
@@ -283,14 +283,16 @@ class StripeProvider:
         Returns:
             ``{"payment_intent": id}`` or ``{"charge": id}``, or ``None`` when no paid payment is found.
         """
-        for item in (invoice.get("payments") or {}).get("data") or []:
-            payment = item.get("payment") or {}
-            if item.get("status") != "paid":
+        for item in getattr(getattr(invoice, "payments", None), "data", None) or []:
+            if getattr(item, "status", None) != "paid":
                 continue
-            intent, charge = self._text_id(payment.get("payment_intent")), self._text_id(payment.get("charge"))
-            if payment.get("type") == "payment_intent" and intent:
+            payment = getattr(item, "payment", None)
+            kind = getattr(payment, "type", None)
+            intent = self._text_id(getattr(payment, "payment_intent", None))
+            charge = self._text_id(getattr(payment, "charge", None))
+            if kind == "payment_intent" and intent:
                 return {"payment_intent": intent}
-            if payment.get("type") == "charge" and charge:
+            if kind == "charge" and charge:
                 return {"charge": charge}
         return None
 
@@ -354,10 +356,10 @@ class StripeProvider:
         """
         target = last.target or {}
         try:
-            listing: Any = self._client.v1.refunds.list(cast(Any, {**target, "limit": 20}))
-            for existing in listing.get("data") or []:
-                if (existing.get("metadata") or {}).get("plan_cancel") == subscription_id:
-                    return CancellationQuote(int(existing["amount"]), last.quote.currency, last.quote.unused_days)
+            listing = self._client.v1.refunds.list(cast(Any, {**target, "limit": 20}))
+            for existing in listing.data:
+                if getattr(existing.metadata, "plan_cancel", None) == subscription_id:
+                    return CancellationQuote(int(existing.amount), last.quote.currency, last.quote.unused_days)
             refund: Any = {**target, "amount": last.quote.refund_minor, "metadata": {"plan_cancel": subscription_id}}
             self._client.v1.refunds.create(refund, {"idempotency_key": f"plan-cancel-{subscription_id}"})
         except stripe.StripeError as exc:

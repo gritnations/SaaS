@@ -58,6 +58,7 @@ class FakeCancelClient:
         self.refunds: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
         self.cancelled: list[tuple[str, dict[str, Any] | None]] = []
         self._existing: list[dict[str, Any]] = []
+        self._status = status
         self._fail_refund = fail_refund
         self._fail_cancel = fail_cancel
         payment = {
@@ -65,25 +66,36 @@ class FakeCancelClient:
             "payment_intent": "pi_test_1" if payment_type == "payment_intent" else None,
             "charge": "ch_test_1" if payment_type == "charge" else None,
         }
-        invoice = {
+        invoice: dict[str, Any] = {
             "status": invoice_status,
             "amount_paid": paid if invoice_status == "paid" else 0,
             "currency": "gbp",
             "payments": {"data": [{"status": "paid", "amount_paid": paid, "payment": payment}]},
         }
         item = {"current_period_start": int(START.timestamp()), "current_period_end": int(END.timestamp())}
-        self._subscription: dict[str, Any] = {
-            "id": SUBSCRIPTION,
-            "status": status,
-            "items": {"data": [item]},
-            "latest_invoice": invoice,
-        }
+        self._subscription = stripe.Subscription.construct_from(
+            {
+                "id": SUBSCRIPTION,
+                "object": "subscription",
+                "status": status,
+                "items": {"object": "list", "data": [{"object": "subscription_item", **item}]},
+                "latest_invoice": {
+                    "object": "invoice",
+                    **invoice,
+                    "payments": {
+                        "object": "list",
+                        "data": [{"object": "invoice_payment", **entry} for entry in invoice["payments"]["data"]],
+                    },
+                },
+            },
+            "sk_test_placeholder",
+        )
         self.v1 = SimpleNamespace(
             subscriptions=SimpleNamespace(retrieve=self._retrieve, cancel=self._cancel),
             refunds=SimpleNamespace(list=self._list, create=self._create),
         )
 
-    def _retrieve(self, subscription: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _retrieve(self, subscription: str, params: dict[str, Any] | None = None) -> stripe.Subscription:
         """Answer a subscription request.
 
         Args:
@@ -97,7 +109,7 @@ class FakeCancelClient:
         assert subscription == SUBSCRIPTION
         return self._subscription
 
-    def _list(self, params: dict[str, Any]) -> dict[str, Any]:
+    def _list(self, params: dict[str, Any]) -> stripe.ListObject[stripe.Refund]:
         """Answer a refund-list request with the refunds made so far.
 
         Args:
@@ -107,7 +119,10 @@ class FakeCancelClient:
             The list.
         """
         self.calls.append("list_refunds")
-        return {"data": list(self._existing)}
+        return stripe.ListObject.construct_from(
+            {"object": "list", "data": [{"object": "refund", **entry} for entry in self._existing]},
+            "sk_test_placeholder",
+        )
 
     def _create(self, params: dict[str, Any], options: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a refund, or raise the configured failure.
