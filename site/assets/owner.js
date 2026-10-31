@@ -19,8 +19,11 @@ const MENU = [
   ["settings", "Settings", "/app/settings/"],
 ];
 
-/** The shorter phone menu. */
+/** The shorter phone menu. The last tab, More, opens a page listing the screens that do not fit. */
 const PHONE_MENU = ["today", "bookings", "services", "settings"];
+
+/** The pages the More tab stands for: it shows as current on each of them. */
+const MORE_PAGES = ["more", "hours", "payments", "plan"];
 
 let session = null;
 
@@ -46,6 +49,12 @@ export function saveSession(value) {
   } catch {
     // Storage unavailable: the session lasts until the page closes.
   }
+}
+
+/** End the session on the server, then leave for the sign-in page. */
+export async function signOut() {
+  if (session) await auth("/logout", {}, { token: session.access });
+  toSignIn();
 }
 
 /** Leave for the sign-in page. */
@@ -191,11 +200,8 @@ function drawFrame(current, b) {
     );
   const bar = el("i");
   bar.style.width = `${Math.round(plan.fraction * 100)}%`;
-  const signOut = el("button", { type: "button", class: "signout" }, "Sign out");
-  signOut.addEventListener("click", async () => {
-    if (session) await auth("/logout", {}, { token: session.access });
-    toSignIn();
-  });
+  const signOutButton = el("button", { type: "button", class: "signout" }, "Sign out");
+  signOutButton.addEventListener("click", signOut);
   fill(
     document.getElementById("side"),
     el("a", { class: "brand", href: "/app/" }, "GRIT", el("span", {}, "NATIONS")),
@@ -219,12 +225,21 @@ function drawFrame(current, b) {
       el("span", { class: "small muted" }, plan.note),
       el("a", { class: "small", href: "/app/plan/" }, b.plan === "free" ? "Choose a plan →" : "Manage your plan →"),
     ),
-    signOut,
+    signOutButton,
   );
   fill(
     document.getElementById("bottom"),
     ...MENU.filter(([key]) => PHONE_MENU.includes(key)).map(([key, label, href]) =>
       el("a", { href, class: key === current ? "on" : null, "aria-current": key === current ? "page" : null }, label),
+    ),
+    el(
+      "a",
+      {
+        href: "/app/more/",
+        class: MORE_PAGES.includes(current) ? "on" : null,
+        "aria-current": current === "more" ? "page" : null,
+      },
+      "More",
     ),
   );
 }

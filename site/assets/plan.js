@@ -68,7 +68,7 @@ async function openStripe(path, body, button) {
 
 /** Start the page. */
 async function start() {
-  const page = await startOwnerPage("");
+  const page = await startOwnerPage("plan");
   if (!page) return;
   slug = page.slug;
   const b = page.business;
