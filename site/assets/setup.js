@@ -2,7 +2,7 @@
 // The details typed at sign-up travel with the login, so the form starts filled in. All text reaches the page
 // through textContent.
 
-import { say, setError } from "./auth.js";
+import { regionFromDevice, say, setError } from "./auth.js";
 import { owner, readSession, sessionEmail, toSignIn, useSession } from "./owner.js";
 
 const input = (id) => document.getElementById(id);
@@ -95,7 +95,7 @@ async function start() {
   input("company").value = meta.company_name || "";
   input("type").value = meta.business_type || "";
   input("other").value = meta.business_type_other || "";
-  input("region").value = ["uk", "ae", "sa", "qa"].includes(meta.region) ? meta.region : "";
+  input("region").value = ["uk", "ae", "sa", "qa"].includes(meta.region) ? meta.region : regionFromDevice();
   input("owner").value = meta.owner_name || "";
   input("other-wrap").hidden = input("type").value !== "other";
   input("type").addEventListener("change", () => {

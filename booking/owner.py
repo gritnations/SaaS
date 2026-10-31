@@ -62,7 +62,8 @@ PLAN_PRICES = {"starter": ("Starter", 900), "pro": ("Pro", 2900)}
 plans and prices are decided. Every paid plan currently includes the same features as the free plan."""
 
 PLAN_CURRENCY = "GBP"
-"""The currency plans are billed in, whatever the business's own currency: prices are set in pounds only."""
+"""The currency plans are billed in, whatever the business's own currency: prices are set in pounds only.
+Provisional: may change once plan pricing for other regions is decided."""
 
 REGIONS = {
     "uk": ("Europe/London", "GBP"),
@@ -72,7 +73,8 @@ REGIONS = {
 }
 """``region -> (IANA time zone, ISO 4217 currency)`` a business can be set up in. Both are fixed at sign-up:
 bookings store amounts without a currency, and payments are checked against the business's currency, so
-changing either later needs a planned move-over."""
+changing either later needs a planned move-over. Provisional: the list of regions may change; keep it in
+step with ``NewBusinessBody.region`` in ``api/owner.py`` and the region choices on the sign-up and set-up pages."""
 
 DEFAULT_HOURS = [(weekday, time(9, 0), time(17, 0)) for weekday in range(1, 6)]
 """Monday to Friday, 09:00 to 17:00, for a new business."""

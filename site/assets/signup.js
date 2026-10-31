@@ -2,7 +2,17 @@
 // The confirmation link returns to the owner dashboard at the site root, which finishes setting up the
 // business from the details saved with the login. All text reaches the page through textContent.
 
-import { DASHBOARD, EMAIL, NOT_CONFIGURED, auth, openDashboard, passwordToggle, say, setError } from "./auth.js";
+import {
+  DASHBOARD,
+  EMAIL,
+  NOT_CONFIGURED,
+  auth,
+  openDashboard,
+  passwordToggle,
+  regionFromDevice,
+  say,
+  setError,
+} from "./auth.js";
 
 const form = document.getElementById("signup-form");
 const fields = ["company", "type", "other", "region", "owner", "email", "password", "terms"];
@@ -140,6 +150,7 @@ async function resend() {
 input("type").addEventListener("change", () => {
   input("other-wrap").hidden = input("type").value !== "other";
 });
+input("region").value = regionFromDevice();
 input("password").addEventListener("input", showStrength);
 passwordToggle("pw-toggle", "password");
 input("resend").addEventListener("click", resend);
