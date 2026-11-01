@@ -638,7 +638,9 @@ class BookingService:
                         HOLD_MINUTES,
                     ),
                 ).fetchone()
-        except errors.ExclusionViolation:
+        except (errors.ExclusionViolation, errors.DeadlockDetected):
+            # A deadlock here is two overlapping requests waiting on each other's overlap check: PostgreSQL
+            # stops one of them, and for that one the time is just as taken as if it had lost the check.
             raise SlotTakenError("That time has just been booked.") from None
         if row is None:
             raise SlotTakenError("That time has just been booked.")

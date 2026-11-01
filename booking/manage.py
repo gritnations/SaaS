@@ -254,7 +254,8 @@ class ManageService:
                     (slot.starts_at, slot.ends_at, slot.ends_at + gap, loaded.booking_id),
                 )
                 after = self._load(connection, slug, reference, token, lock=False).managed
-        except errors.ExclusionViolation:
+        except (errors.ExclusionViolation, errors.DeadlockDetected):
+            # See BookingService.create_booking: a deadlock between overlapping requests means the time is taken.
             raise SlotTakenError("That time has just been booked.") from None
         if self._notifier is not None:
             self._notifier.booking_event("moved", loaded.booking_id, token)

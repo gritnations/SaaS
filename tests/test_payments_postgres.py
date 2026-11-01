@@ -12,6 +12,7 @@ and a business gets exactly one payment account.
 
 import os
 import secrets
+import threading
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
@@ -28,6 +29,7 @@ from booking.service import (
     BookingService,
     InvalidSlotError,
     PaymentUnavailableError,
+    SlotTakenError,
 )
 from payments.base import CheckoutOrder, HostedCheckout, PaymentEvent, ProviderUnavailableError
 from postgres import Database, DatabaseSettings
@@ -432,3 +434,33 @@ def test_a_business_gets_one_payment_account_and_readiness_is_refreshed(world: W
     assert world.payments.settings(world.owner, world.slug).enabled is True
     with pytest.raises(Exception):
         world.payments.connect(str(uuid.uuid4()), world.slug)
+
+
+def test_racing_requests_for_one_paid_session_make_exactly_one_hold(world: World) -> None:
+    """Six simultaneous requests for the same paid session: one hold with one checkout, the rest are refused."""
+    barrier = threading.Barrier(6)
+    outcomes: list[object] = [None] * 6
+
+    def attempt(index: int) -> None:
+        """Wait for every thread, then try to book the paid session at 10:00.
+
+        Args:
+            index: Which racing request.
+        """
+        barrier.wait()
+        try:
+            outcomes[index] = book(world)
+        except Exception as exc:  # noqa: BLE001 - the outcome is the point of the test
+            outcomes[index] = exc
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(6)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    holds = [o for o in outcomes if isinstance(o, tuple)]
+    refused = [o for o in outcomes if isinstance(o, InvalidSlotError | SlotTakenError)]
+    assert len(holds) == 1 and len(refused) == 5, f"unexpected outcomes: {outcomes!r}"
+    assert len(world.provider.orders) == 1
+    assert row(world, holds[0][0])[:2] == ("pending_payment", "awaiting")
+    assert "10:00" not in free_times(world)
