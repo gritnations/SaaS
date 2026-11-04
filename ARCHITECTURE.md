@@ -308,6 +308,168 @@ first feature is chosen:
 - Cost per business, since AI calls are paid per use and must fit the plan
   prices
 
+## Discussion notes for consideration (proposals, not decisions)
+
+**Status: discussion notes recorded 2026-11-04.** They are not approved
+requirements, architecture decisions, provider selections or instructions to
+implement anything. They do not change the decided platform direction above,
+the first-release scope or the code. They are context for future product and
+engineering work: where a note applies to work in progress, bring the
+suggestion forward with supporting evidence. Any change to architecture
+stays with the CTO, and any change to product scope or pricing stays with the
+founders.
+
+Labels used below: **Proposal** (an idea for consideration), **Exists** (a
+fact about this repository, checked on the date above), **Unverified** (not
+yet researched, including every cost, accuracy and provider claim) and
+**Open** (a question to settle later).
+
+### Product focus
+
+- **Proposal:** keep scheduling and booking as the main product focus,
+  alongside payment processing. The ideas below are secondary and are
+  considered only where they support, or follow from, that focus.
+
+### Security, modularity and simultaneous use
+
+- **Proposal:** consider security hardening, modularisation and reliable
+  handling of simultaneous users and bookings. Assess the existing protections
+  first, and propose additional work only for the gaps that assessment shows.
+- **Exists:**
+  - The layering described under "Current direction": ingress controls in
+    `main.py`, endpoint authorisation in the API, business rules in bounded
+    services, data permissions in the database.
+  - `main.py` applies trusted-host and CORS checks, a request body limit of
+    65,536 bytes, and security response headers (content-type options, no
+    referrer, no caching, a restrictive content security policy, strict
+    transport security).
+  - The database connection must be encrypted.
+  - Row-level security is enabled on all six application tables
+    (`businesses`, `services`, `weekly_hours`, `bookings`, `business_members`,
+    `email_log`).
+  - Overlapping live bookings of one business are refused by a database
+    exclusion constraint. Tests race simultaneous requests at a real
+    PostgreSQL database: the same slot (repeated rounds), overlapping
+    sessions of different lengths, a customer move against new bookings, a
+    cancel against moves of one booking, and a paid hold. They found that a
+    deadlock between overlapping requests was answered as an internal error
+    rather than "time taken"; that is now handled.
+  - Limits recorded in those tests: the transaction-mode connection pooler is
+    not covered, and neither is load beyond about a dozen simultaneous
+    requests. A payment confirmation racing a new booking, and simultaneous
+    requests across two businesses, are not raced.
+  - No request rate limiting was found in the application code. Limits applied
+    by the hosting platform were not checked.
+- **Open:** which of these gaps matter for the first release, and where rate
+  limiting, if wanted, belongs.
+
+### Database migrations (Alembic)
+
+- **Proposal:** consider Alembic only if it fits the architecture ultimately
+  selected.
+- **Exists:** migrations are ten numbered plain SQL files in `migrations/`.
+  The repository has no Alembic dependency, no migration runner and no record
+  of which migrations a database has applied. The real-database tests assume
+  every migration has been applied. How migrations are applied to a hosted
+  database is not recorded in this repository.
+- **Open:** what the chosen tenancy model and hosting need, and whether a record
+  of applied versions is wanted whichever tool is used.
+
+### English and Arabic call summaries (possible paid feature)
+
+- **Proposal:** explore English and Arabic summaries of calls as a possible paid
+  feature for businesses that meet their customers on Google Meet, Zoom or
+  Teams.
+- **Stated requirement for any future research:** only the final summary is kept
+  in our database. Audio, video, recordings and full transcripts are not
+  persisted by us. Each provider's own retention is to be evaluated as part of
+  the research.
+- **Proposal:** evaluate a meeting-bot style service (Recall.ai was named). A
+  separate speech-to-text model (Whisper was named) may be unnecessary if the
+  chosen integration provides suitable transcription.
+- **Unverified:** provider selection, Arabic accuracy and all costs.
+- **Exists:** there is no call-summary, transcription or meeting-platform
+  integration in this repository, and no design for one beyond the one-line
+  mention of meeting summaries in the AI candidates above. The platform
+  supports one fixed meeting link per business, which is included in customer
+  emails and the calendar invite; it does not create meetings or join them.
+- **Open:**
+  - What a provider keeps (media, transcripts, metadata), where, for how long,
+    and whether retention can be set to zero or short; whether the provider
+    counts as a sub-processor.
+  - Consent and notification duties for recording or transcribing the people
+    on a call, in each market served.
+  - The rules of each meeting platform for automated participants.
+  - Arabic accuracy, including dialects and calls that mix Arabic and English,
+    tested on real samples rather than assumed.
+  - Cost per call across transcription, summarisation and failed attempts, and
+    what an allowance or plan price could support.
+  - How "summary only" is enforced and shown, including logs, error reports,
+    backups and anything a provider returns.
+  - Whether the owner approves a summary before anyone sees it (see the
+    consent point under "AI capabilities").
+
+### Possible future opportunities (least developed)
+
+- **Proposal:** consider storage, isolated cloud workspaces, computing
+  resources and database services as possible future opportunities, subject to
+  customer demand and product scope.
+- **Unverified:** demand, cost, competitive position and the security and legal
+  obligations of holding customers' files or running their workloads.
+
+### Trial
+
+- **Proposal:** consider a one-week trial to learn which features customers
+  value.
+- **Exists:** the code starts a new business on a 14-day trial (`TRIAL_DAYS`).
+- **Open:** whether a week is long enough to show real use, what would be
+  measured and how without intrusive tracking, and the decision itself, which
+  belongs with pricing.
+
+### Pricing of optional services
+
+- **Proposal:** evaluate sustainable pricing for optional services rather than
+  assuming any particular markup is sufficient.
+- **Open:** the inputs to model (provider unit costs, summarisation, failed and
+  repeated attempts, payment fees, support, hosting), and whether usage is
+  allowed within a plan or metered. Plan tiers and pricing are the CEO's
+  decision (see the open questions below).
+
+### Cloud marketplace discussion
+
+- A discussion mentioned a cloud provider's marketplace (Azure / Marketplace).
+  It is **not** a decision or proposal to migrate this platform. Hosting and
+  runtime remain undecided, as stated above. The details of that discussion are
+  not captured here and nothing about it has been verified.
+
+### Tensions with existing requirements
+
+- **Summary-only retention against general storage.** Holding customers' files
+  or workloads (storage, workspaces, databases) is the opposite of keeping
+  only a summary. It would also change the platform's role towards that data.
+- **Summary-only retention against earlier drafts.** Earlier working drafts of
+  an AI meeting-notes design in the project tracker (not reproduced here)
+  assumed storing transcripts or pasted notes per business for a retention
+  period, and transcribing on the owner's device. A summary-only requirement
+  changes or replaces those assumptions and should be reconciled when that
+  design is revisited.
+- **Product focus against new product lines.** Storage, workspace, compute and
+  database offers would be new lines beside scheduling, booking and payments.
+- **Meeting link against meeting bot.** Today the platform only passes a link.
+  A bot that joins calls depends on each meeting platform's rules.
+- **One-week trial against the 14-day trial in the code.**
+- **First-release scope.** "Which AI feature, if any, goes into the first
+  release" is still open, so call summaries are a candidate only.
+
+### How to use these notes
+
+During future relevant work, use them as context and bring forward applicable
+suggestions with evidence: protections checked in the code first, provider
+claims checked against each provider's latest published documentation (see
+"Integration rule (from the CTO)"), and costs taken from published pricing.
+Nothing here becomes a requirement until the CTO or the founders decide it in
+the appropriate place.
+
 ## Integration rule (from the CTO)
 
 For any payment, messaging or calendar integration, the source of truth is
@@ -336,3 +498,7 @@ finding targets, but never replaces that check.
 - Which communication channels to launch with first — not decided
 - Multi-currency / non-Saudi-market support, given Paymob is SAR-only
   today
+- Discussion notes recorded 2026-11-04 (see "Discussion notes for
+  consideration"): call-summary retention and provider evaluation, trial
+  length, pricing of optional services and migration tooling. All
+  unresolved; none decided
