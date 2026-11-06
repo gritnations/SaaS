@@ -200,6 +200,53 @@ def test_a_booking_inside_new_days_off_stays_and_is_counted(world: World) -> Non
         assert found.status == "confirmed"
 
 
+def test_a_customer_can_still_view_and_cancel_a_booking_on_a_closed_day(world: World) -> None:
+    """Closing a day changes nothing for a customer who already booked it, and they can still cancel it."""
+    day = world.today + timedelta(days=5)
+    made = world.bookings.create_booking(world.slug, request(day))
+    assert made.manage_token is not None
+    world.owners.add_time_off(world.account, world.slug, day, day, None)
+    viewed = world.manage.view(world.slug, made.reference, made.manage_token)
+    assert viewed.status == "confirmed" and viewed.starts_at.astimezone(ZoneInfo("Europe/London")).date() == day
+    cancelled = world.manage.cancel(world.slug, made.reference, made.manage_token)
+    assert cancelled.status == "cancelled"
+
+
+def test_a_customer_can_still_move_a_booking_away_from_a_closed_day_but_not_within_it(world: World) -> None:
+    """A move off a closed day to an open day works; a move to another time on the closed day does not."""
+    closed, open_day = world.today + timedelta(days=5), world.today + timedelta(days=6)
+    made = world.bookings.create_booking(world.slug, request(closed, "10:00"))
+    assert made.manage_token is not None
+    world.owners.add_time_off(world.account, world.slug, closed, closed, None)
+    with pytest.raises(InvalidSlotError):
+        world.manage.move(world.slug, made.reference, made.manage_token, closed, "14:00")
+    still = world.manage.view(world.slug, made.reference, made.manage_token)
+    assert still.status == "confirmed" and still.starts_at.astimezone(ZoneInfo("Europe/London")).hour == 10
+    moved = world.manage.move(world.slug, made.reference, made.manage_token, open_day, "10:00")
+    assert moved.starts_at.astimezone(ZoneInfo("Europe/London")).date() == open_day
+    assert live_starts_on(world, closed) == []
+
+
+def live_starts_on(world: World, day: date) -> list[str]:
+    """List the local start times of the business's live bookings on one local date.
+
+    Args:
+        world: The test business.
+        day: The local date.
+
+    Returns:
+        ``HH:MM`` for each live booking that day.
+    """
+    zone = ZoneInfo("Europe/London")
+    with world.database.connection() as connection:
+        rows = connection.execute(
+            "SELECT b.starts_at FROM bookings b JOIN businesses s ON s.id = b.business_id "
+            "WHERE s.slug = %s AND b.status IN ('confirmed', 'pending_payment') ORDER BY b.starts_at",
+            (world.slug,),
+        ).fetchall()
+    return [r[0].astimezone(zone).strftime("%H:%M") for r in rows if r[0].astimezone(zone).date() == day]
+
+
 def test_removing_a_day_off_brings_its_times_back(world: World) -> None:
     """Removal returns what is left, and the closed day opens again."""
     day = world.today + timedelta(days=5)
