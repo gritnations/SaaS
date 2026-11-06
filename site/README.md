@@ -14,7 +14,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 | `app/`          | Owner Today screen.                                                       |
 | `app/bookings/` | Bookings: by day, look-up by reference, details, cancel.                  |
 | `app/services/` | Services: edit and add.                                                   |
-| `app/hours/`    | Opening hours: weekly editor.                                             |
+| `app/hours/`    | Opening hours: weekly editor, and days off (a day or a run of days).       |
 | `app/settings/` | Business details, customer contact details and booking rules.             |
 | `app/payments/` | Stripe connection and how customers pay.                                  |
 | `app/plan/`     | Plan, upgrades, the subscription portal, and cancel with a refund.         |
