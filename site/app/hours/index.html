@@ -33,6 +33,24 @@
         <p class="notice" id="hours-msg" role="status" hidden></p>
         <button class="btn" type="button" id="save-hours">Save opening hours</button>
       </section>
+
+      <section class="panel" aria-labelledby="off-h">
+        <h2 id="off-h">Days off</h2>
+        <p class="small muted">
+          Close a day or a run of days, such as a holiday. Customers won't see times on those days. Bookings that are
+          already made are not changed. Dates are in your business's time zone.
+        </p>
+        <form class="off-form" id="off-form" novalidate>
+          <label class="field" for="off-from">From <input id="off-from" type="date" required /></label>
+          <label class="field" for="off-to">To (optional) <input id="off-to" type="date" /></label>
+          <label class="field" for="off-note"
+            >Note (only you see this) <input id="off-note" type="text" maxlength="100"
+          /></label>
+          <button class="btn" type="submit" id="off-add">Add days off</button>
+        </form>
+        <p class="notice" id="off-msg" role="status" hidden></p>
+        <ul class="off-list" id="off-list" aria-label="Days off"></ul>
+      </section>
     </main>
     <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
   </body>
