@@ -25,6 +25,7 @@ from booking.owner import (
     OwnerBooking,
     OwnerServiceRecord,
     Settings,
+    TimeOff,
 )
 from booking.service import Business, NotFoundError
 from main import create_app
@@ -32,6 +33,7 @@ from postgres import DatabaseUnavailableError
 
 ACCOUNT = "11111111-1111-4111-8111-111111111111"
 GOOD = {"Authorization": "Bearer good-token"}
+ENTRY_ID = "0b6c3f0e-6a8e-4d3e-9a51-0f3c1f2d9a10"
 BUSINESS = Business("internal-id", "example", "Example Advisory", "Europe/London", "GBP", 0, 240, 30)
 BOOKING = OwnerBooking(
     "ZA2JBN2C5B",
@@ -227,6 +229,51 @@ class FakeOwners:
         self._record("replace_hours", account, slug, blocks)
         return blocks
 
+    def time_off(self, account: str, slug: str) -> list[TimeOff]:
+        """Return one day-off entry.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+
+        Returns:
+            The entries.
+        """
+        self._record("time_off", account, slug)
+        return [TimeOff(ENTRY_ID, date(2026, 11, 16), date(2026, 11, 20), "Leave")]
+
+    def add_time_off(
+        self, account: str, slug: str, first_day: date, last_day: date, note: str | None
+    ) -> tuple[list[TimeOff], int]:
+        """Echo the new entry and report two bookings in it.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+            first_day: First closed day.
+            last_day: Last closed day.
+            note: The private note.
+
+        Returns:
+            The entries and the number of bookings inside the new days off.
+        """
+        self._record("add_time_off", account, slug, first_day, last_day, note)
+        return [TimeOff(ENTRY_ID, first_day, last_day, note)], 2
+
+    def remove_time_off(self, account: str, slug: str, entry: str) -> list[TimeOff]:
+        """Remove an entry and return what is left.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+            entry: The entry identifier.
+
+        Returns:
+            The remaining entries.
+        """
+        self._record("remove_time_off", account, slug, entry)
+        return []
+
     def settings(self, account: str, slug: str) -> Settings:
         """Return the settings.
 
@@ -305,6 +352,9 @@ ROUTES: list[tuple[str, str, dict[str, Any] | None]] = [
     ("patch", "/owner/businesses/example/services/intro", {"name": "Y"}),
     ("get", "/owner/businesses/example/hours", None),
     ("put", "/owner/businesses/example/hours", {"blocks": []}),
+    ("get", "/owner/businesses/example/time-off", None),
+    ("post", "/owner/businesses/example/time-off", {"first_day": "2026-11-16"}),
+    ("post", f"/owner/businesses/example/time-off/{ENTRY_ID}/remove", None),
     ("get", "/owner/businesses/example/settings", None),
     ("patch", "/owner/businesses/example/settings", {"window_days": 14}),
 ]

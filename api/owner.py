@@ -20,7 +20,7 @@ from datetime import date, datetime, time
 from typing import Annotated, Protocol, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from api.auth import TokenError, TokenVerifier
 from api.booking import EMAIL_PATTERN, PHONE_PATTERN, SLUG_PATTERN, Slug
@@ -39,6 +39,7 @@ from booking.owner import (
     OwnerBooking,
     OwnerServiceRecord,
     Settings,
+    TimeOff,
 )
 from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
 from booking.service import Business, NotFoundError
@@ -162,6 +163,48 @@ class OwnerBackend(Protocol):
 
         Returns:
             The stored blocks.
+        """
+        ...
+
+    def time_off(self, account: str, slug: str) -> list[TimeOff]:
+        """See :meth:`booking.owner.OwnerService.time_off`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+
+        Returns:
+            The current and upcoming entries.
+        """
+        ...
+
+    def add_time_off(
+        self, account: str, slug: str, first_day: date, last_day: date, note: str | None
+    ) -> tuple[list[TimeOff], int]:
+        """See :meth:`booking.owner.OwnerService.add_time_off`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+            first_day: First closed local date.
+            last_day: Last closed local date.
+            note: A private note, or ``None``.
+
+        Returns:
+            The entries and how many live bookings fall inside the new days off.
+        """
+        ...
+
+    def remove_time_off(self, account: str, slug: str, entry: str) -> list[TimeOff]:
+        """See :meth:`booking.owner.OwnerService.remove_time_off`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+            entry: The entry's identifier.
+
+        Returns:
+            The entries that remain.
         """
         ...
 
@@ -477,6 +520,72 @@ class HoursOut(BaseModel):
     """
 
     blocks: list[HoursBlockBody]
+
+
+class TimeOffBody(BaseModel):
+    """A run of whole days the business is closed.
+
+    Attributes:
+        first_day: First closed local date.
+        last_day: Last closed local date, both ends included. Leave it out to close a single day.
+        note: A private note for the owner, up to 100 characters.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_day: date
+    last_day: date | None = None
+    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def check_range(self) -> "TimeOffBody":
+        """Refuse a run that ends before it starts.
+
+        Returns:
+            The body.
+
+        Raises:
+            ValueError: If ``last_day`` is before ``first_day``.
+        """
+        if self.last_day is not None and self.last_day < self.first_day:
+            raise ValueError("last_day is before first_day")
+        return self
+
+
+class TimeOffOut(BaseModel):
+    """One days-off entry.
+
+    Attributes:
+        id: The entry's identifier.
+        first_day: First closed local date.
+        last_day: Last closed local date.
+        note: The private note, or ``None``.
+    """
+
+    id: str
+    first_day: date
+    last_day: date
+    note: str | None
+
+
+class TimeOffListOut(BaseModel):
+    """The current and upcoming days off.
+
+    Attributes:
+        entries: Earliest first.
+    """
+
+    entries: list[TimeOffOut]
+
+
+class TimeOffAddedOut(TimeOffListOut):
+    """The days off after one was added.
+
+    Attributes:
+        bookings_affected: How many live bookings fall inside the new days off. They are not changed.
+    """
+
+    bookings_affected: int
 
 
 class SettingsOut(BaseModel):
@@ -841,6 +950,18 @@ class CancelPlanOut(BaseModel):
     unused_days: int
 
 
+def _time_off_out(entries: list[TimeOff]) -> list[TimeOffOut]:
+    """Convert days-off entries for the response.
+
+    Args:
+        entries: The entries.
+
+    Returns:
+        Their public form for the owner.
+    """
+    return [TimeOffOut(id=e.id, first_day=e.first_day, last_day=e.last_day, note=e.note) for e in entries]
+
+
 def _membership_out(found: Membership) -> MembershipOut:
     """Convert a membership for the response.
 
@@ -1095,6 +1216,56 @@ def build_router(
         """
         blocks = [HoursBlock(b.weekday, _parse_time(b.start), _parse_time(b.end)) for b in body.blocks]
         return _hours_out(answer(lambda: service().replace_hours(who, business, blocks)))
+
+    @router.get("/businesses/{business}/time-off", response_model=TimeOffListOut)
+    def get_time_off(who: Account, business: Slug) -> TimeOffListOut:
+        """List the days off that are current or upcoming.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The entries.
+        """
+        return TimeOffListOut(entries=_time_off_out(answer(lambda: service().time_off(who, business))))
+
+    @router.post("/businesses/{business}/time-off", response_model=TimeOffAddedOut, status_code=201)
+    def post_time_off(who: Account, business: Slug, body: TimeOffBody) -> TimeOffAddedOut:
+        """Close a run of whole days. Existing bookings are not changed; the answer says how many fall inside.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            body: The days and an optional private note.
+
+        Returns:
+            The entries, and how many live bookings fall inside the new days off.
+        """
+        entries, affected = answer(
+            lambda: service().add_time_off(
+                who, business, body.first_day, body.last_day or body.first_day, body.note or None
+            )
+        )
+        return TimeOffAddedOut(entries=_time_off_out(entries), bookings_affected=affected)
+
+    @router.post("/businesses/{business}/time-off/{entry}/remove", response_model=TimeOffListOut)
+    def remove_time_off(
+        who: Account, business: Slug, entry: Annotated[str, Path(pattern=r"^[0-9a-fA-F-]{36}$")]
+    ) -> TimeOffListOut:
+        """Remove one days-off entry, which opens those days again.
+
+        This is a POST because the API's cross-origin rules allow GET, POST, PUT and PATCH only.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            entry: The entry identifier.
+
+        Returns:
+            The entries that remain.
+        """
+        return TimeOffListOut(entries=_time_off_out(answer(lambda: service().remove_time_off(who, business, entry))))
 
     @router.get("/businesses/{business}/settings", response_model=SettingsOut)
     def get_settings(who: Account, business: Slug) -> SettingsOut:

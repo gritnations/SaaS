@@ -447,6 +447,34 @@ class BookingService:
         return blocks
 
     @staticmethod
+    def _closed_days(connection: psycopg.Connection[Any], business: Business, first: date, last: date) -> set[date]:
+        """Load the days the business has taken off within a run of dates.
+
+        A day off closes whole local days. It never changes a booking that already exists: it only removes
+        sessions from what customers can choose, book or move to.
+
+        Args:
+            connection: An open connection.
+            business: The business.
+            first: The first date asked about.
+            last: The last date asked about.
+
+        Returns:
+            The closed dates between ``first`` and ``last``.
+        """
+        rows = connection.execute(
+            "SELECT first_day, last_day FROM time_off WHERE business_id = %s AND last_day >= %s AND first_day <= %s",
+            (business.id, first, last),
+        ).fetchall()
+        closed: set[date] = set()
+        for start, end in rows:
+            day = max(start, first)
+            while day <= min(end, last):
+                closed.add(day)
+                day += timedelta(days=1)
+        return closed
+
+    @staticmethod
     def _booked(
         connection: psycopg.Connection[Any],
         business: Business,
@@ -506,10 +534,13 @@ class BookingService:
         period_start = datetime.combine(wanted[0], datetime.min.time(), zone)
         period_end = datetime.combine(wanted[-1] + timedelta(days=1), datetime.min.time(), zone)
         blocks = self._blocks(connection, business)
+        closed = self._closed_days(connection, business, wanted[0], wanted[-1])
         booked = self._booked(connection, business, period_start, period_end, exclude_reference)
         earliest = now + timedelta(minutes=business.notice_minutes)
         result = []
         for day in wanted:
+            if day in closed:
+                continue
             slots = day_slots(
                 day,
                 blocks.get(weekday_index(day), []),
