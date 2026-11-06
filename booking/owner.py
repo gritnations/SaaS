@@ -11,9 +11,11 @@ Customer details leave the database only through this module, and only to a memb
 """
 
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg import errors
@@ -33,6 +35,15 @@ MAX_DAYS_PER_REQUEST = 62
 
 MAX_BLOCKS = 50
 """The most working blocks a business may have across the week."""
+
+MAX_TIME_OFF = 100
+"""The most days-off entries, current or upcoming, a business may have."""
+
+MAX_TIME_OFF_DAYS = 366
+"""The longest run of days one days-off entry may cover, both ends included."""
+
+MAX_TIME_OFF_NOTE = 100
+"""The longest private note on a days-off entry."""
 
 REFERENCE_PATTERN = re.compile(r"^[A-Z0-9]{10}$")
 
@@ -226,6 +237,23 @@ class HoursBlock:
     weekday: int
     start: time
     end: time
+
+
+@dataclass(frozen=True)
+class TimeOff:
+    """A run of whole local days the business is closed, on top of its weekly hours.
+
+    Attributes:
+        id: The entry's identifier.
+        first_day: First closed local date.
+        last_day: Last closed local date, both ends included.
+        note: A private note for the owner, or ``None``.
+    """
+
+    id: str
+    first_day: date
+    last_day: date
+    note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -617,6 +645,121 @@ class OwnerService:
                     (business.id, block.weekday, block.start, block.end),
                 )
         return sorted(blocks, key=lambda block: (block.weekday, block.start))
+
+    @staticmethod
+    def _upcoming_time_off(connection: psycopg.Connection[Any], business: Business) -> list[TimeOff]:
+        """List the entries that have not ended yet, in the business's own calendar.
+
+        Args:
+            connection: An open connection.
+            business: The business.
+
+        Returns:
+            The current and upcoming entries, earliest first.
+        """
+        today = datetime.now(ZoneInfo(business.time_zone)).date()
+        rows = connection.execute(
+            "SELECT id::text, first_day, last_day, note FROM time_off "
+            "WHERE business_id = %s AND last_day >= %s ORDER BY first_day, last_day, created_at",
+            (business.id, today),
+        ).fetchall()
+        return [TimeOff(*row) for row in rows]
+
+    def time_off(self, account: str, slug: str) -> list[TimeOff]:
+        """List the days off that are current or upcoming.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            The entries, earliest first.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+        """
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            return self._upcoming_time_off(connection, business)
+
+    def add_time_off(
+        self, account: str, slug: str, first_day: date, last_day: date, note: str | None
+    ) -> tuple[list[TimeOff], int]:
+        """Close a run of whole local days. A booking that already exists is never changed or cancelled.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+            first_day: First closed local date.
+            last_day: Last closed local date, both ends included.
+            note: A private note, or ``None``.
+
+        Returns:
+            The current and upcoming entries, and how many live bookings fall inside the new days off.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+            InvalidChangeError: If the run ends before it starts, covers more than :data:`MAX_TIME_OFF_DAYS`
+                days, starts in the past (in the business's own calendar), the note is longer than
+                :data:`MAX_TIME_OFF_NOTE` characters, or the business already has :data:`MAX_TIME_OFF` entries.
+        """
+        if last_day < first_day or (last_day - first_day).days + 1 > MAX_TIME_OFF_DAYS:
+            raise InvalidChangeError(
+                f"Days off must end on or after they start, and cover at most {MAX_TIME_OFF_DAYS} days."
+            )
+        text = (note or "").strip() or None
+        if text is not None and len(text) > MAX_TIME_OFF_NOTE:
+            raise InvalidChangeError(f"A note can have at most {MAX_TIME_OFF_NOTE} characters.")
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            zone = ZoneInfo(business.time_zone)
+            if first_day < datetime.now(zone).date():
+                raise InvalidChangeError("Days off cannot start in the past.")
+            connection.execute("SELECT 1 FROM businesses WHERE id = %s FOR UPDATE", (business.id,))
+            if len(self._upcoming_time_off(connection, business)) >= MAX_TIME_OFF:
+                raise InvalidChangeError(f"At most {MAX_TIME_OFF} days-off entries are allowed.")
+            connection.execute(
+                "INSERT INTO time_off (business_id, first_day, last_day, note) VALUES (%s, %s, %s, %s)",
+                (business.id, first_day, last_day, text),
+            )
+            row = connection.execute(
+                "SELECT count(*) FROM bookings WHERE business_id = %s AND status IN ('confirmed', 'pending_payment') "
+                "AND starts_at >= %s AND starts_at < %s",
+                (
+                    business.id,
+                    datetime.combine(first_day, time.min, zone),
+                    datetime.combine(last_day + timedelta(days=1), time.min, zone),
+                ),
+            ).fetchone()
+            entries = self._upcoming_time_off(connection, business)
+        return entries, int(row[0]) if row else 0
+
+    def remove_time_off(self, account: str, slug: str, entry: str) -> list[TimeOff]:
+        """Remove one days-off entry, which opens those days again.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+            entry: The entry's identifier.
+
+        Returns:
+            The entries that remain, current or upcoming.
+
+        Raises:
+            NotFoundError: If the account does not manage the business, or the business has no such entry.
+        """
+        try:
+            entry_id = str(uuid.UUID(entry))
+        except ValueError:
+            raise NotFoundError("Day off not found.") from None
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            removed = connection.execute(
+                "DELETE FROM time_off WHERE id = %s AND business_id = %s", (entry_id, business.id)
+            ).rowcount
+            if removed == 0:
+                raise NotFoundError("Day off not found.")
+            return self._upcoming_time_off(connection, business)
 
     @staticmethod
     def _settings(connection: psycopg.Connection[Any], business: Business) -> Settings:
