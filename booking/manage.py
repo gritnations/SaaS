@@ -34,6 +34,7 @@ from booking.service import (
     hash_token,
     release_expired_holds,
 )
+from payments.base import BookingRefunds, ProviderUnavailableError
 from postgres import Database
 
 
@@ -56,6 +57,7 @@ class ManagedBooking:
         can_move: Whether the customer may move it now.
         cancel_deadline: The last moment to cancel online.
         move_deadline: The last moment to move online.
+        payment_status: ``not_required``, ``at_venue``, ``paid`` (taken online) or ``refunded``.
     """
 
     reference: str
@@ -68,13 +70,14 @@ class ManagedBooking:
     can_move: bool
     cancel_deadline: datetime
     move_deadline: datetime
+    payment_status: str = "not_required"
 
 
 _LOOKUP = (
     "SELECT b.id::text, b.reference, b.status, b.starts_at, b.ends_at, b.manage_token_hash, "
     "s.id::text, s.slug, s.name, s.duration_minutes, s.price_minor, "
     "z.id::text, z.slug, z.name, z.time_zone, z.currency, z.break_minutes, z.notice_minutes, z.window_days, "
-    "z.cancel_cutoff_minutes, z.move_cutoff_minutes "
+    "z.cancel_cutoff_minutes, z.move_cutoff_minutes, b.payment_status, b.payment_id, z.payment_account_id "
     "FROM bookings b JOIN services s ON s.id = b.service_id JOIN businesses z ON z.id = b.business_id "
     "WHERE z.slug = %s AND b.reference = %s"
 )
@@ -89,12 +92,16 @@ class _Row:
         managed: The customer's view.
         cancel_cutoff: Minutes before the start after which cancelling online is closed.
         move_cutoff: Minutes before the start after which moving online is closed.
+        payment_id: The online payment, if one was taken.
+        payment_account: The business's payment account, if it has one.
     """
 
     booking_id: str
     managed: ManagedBooking
     cancel_cutoff: int
     move_cutoff: int
+    payment_id: str | None = None
+    payment_account: str | None = None
 
 
 class ManageService:
@@ -105,6 +112,7 @@ class ManageService:
         database: Database,
         clock: Callable[[], datetime] | None = None,
         notifier: BookingNotifier | None = None,
+        refunds: BookingRefunds | None = None,
     ) -> None:
         """Create the service. Performs no I/O.
 
@@ -112,7 +120,10 @@ class ManageService:
             database: The database boundary.
             clock: Returns the current aware instant. ``None`` means the system clock in UTC.
             notifier: Sends emails after a change is committed. ``None`` sends nothing.
+            refunds: Gives a paid booking's payment back when the customer cancels. ``None`` means a paid
+                booking cannot be cancelled online.
         """
+        self._refunds = refunds
         self._database = database
         self._clock = clock if clock is not None else (lambda: datetime.now(UTC))
         self._notifier = notifier
@@ -159,8 +170,9 @@ class ManageService:
             can_move=active and now <= move_deadline,
             cancel_deadline=cancel_deadline,
             move_deadline=move_deadline,
+            payment_status=row[21],
         )
-        return _Row(row[0], managed, cancel_cutoff, move_cutoff)
+        return _Row(row[0], managed, cancel_cutoff, move_cutoff, row[22], row[23])
 
     def view(self, slug: str, reference: str, token: str) -> ManagedBooking:
         """Show a booking to the holder of its manage code.
@@ -193,6 +205,8 @@ class ManageService:
         Raises:
             NotFoundError: If the business, reference or code does not match.
             TooLateError: If the cancellation deadline has passed.
+            ProviderUnavailableError: If a paid booking could not be refunded. The booking is left as it was,
+                so the customer can try again; a refund already made is found, never repeated.
         """
         with self._database.connection() as connection:
             loaded = self._load(connection, slug, reference, token, lock=True)
@@ -200,10 +214,16 @@ class ManageService:
                 return loaded.managed
             if not loaded.managed.can_cancel:
                 raise TooLateError("It is too late to cancel online. Please contact the business.")
+            paid = loaded.managed.payment_status == "paid"
+            if paid:
+                if self._refunds is None or not loaded.payment_id or not loaded.payment_account:
+                    raise ProviderUnavailableError("This paid booking cannot be refunded automatically.")
+                # The refund comes first: a failed refund leaves the booking untouched, and a repeat is safe.
+                self._refunds.refund_booking(loaded.payment_account, loaded.payment_id, loaded.managed.reference)
             connection.execute(
-                "UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'customer' "
-                "WHERE id = %s",
-                (loaded.booking_id,),
+                "UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'customer', "
+                "payment_status = CASE WHEN %s THEN 'refunded' ELSE payment_status END WHERE id = %s",
+                (paid, loaded.booking_id),
             )
             after = self._load(connection, slug, reference, token, lock=False).managed
         if self._notifier is not None:

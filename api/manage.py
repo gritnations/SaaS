@@ -20,6 +20,7 @@ from api.booking import ServiceOut, Slug
 from booking.availability import session_label
 from booking.manage import ManagedBooking, TooLateError
 from booking.service import InvalidSlotError, NotFoundError, SlotTakenError
+from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
 
 Token = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{48}$")]
@@ -116,6 +117,8 @@ class ManagedOut(BaseModel):
         can_move: Whether it can be moved online now.
         cancel_deadline: Last moment to cancel online, ISO 8601.
         move_deadline: Last moment to move online, ISO 8601.
+        paid_online: Whether the booking was paid by card and not refunded.
+        refunded: Whether the card payment was refunded.
     """
 
     reference: str
@@ -131,6 +134,8 @@ class ManagedOut(BaseModel):
     can_move: bool
     cancel_deadline: str
     move_deadline: str
+    paid_online: bool = False
+    refunded: bool = False
 
 
 def managed_out(booking: ManagedBooking) -> ManagedOut:
@@ -166,6 +171,8 @@ def managed_out(booking: ManagedBooking) -> ManagedOut:
         can_move=booking.can_move,
         cancel_deadline=booking.cancel_deadline.astimezone(zone).isoformat(),
         move_deadline=booking.move_deadline.astimezone(zone).isoformat(),
+        paid_online=booking.payment_status == "paid",
+        refunded=booking.payment_status == "refunded",
     )
 
 
@@ -190,7 +197,8 @@ def build_router(backend: Callable[[], ManageBackend | None]) -> APIRouter:
             The booking's public form.
 
         Raises:
-            HTTPException: 404 not found, 409 too late or unavailable, 503 unavailable.
+            HTTPException: 404 not found, 409 too late or unavailable, 503 unavailable (including a refund that
+                could not be made, in which case nothing was changed).
         """
         service = backend()
         if service is None:
@@ -201,6 +209,11 @@ def build_router(backend: Callable[[], ManageBackend | None]) -> APIRouter:
             raise HTTPException(status_code=404, detail="Booking not found.") from None
         except (TooLateError, InvalidSlotError, SlotTakenError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        except ProviderUnavailableError:
+            raise HTTPException(
+                status_code=503,
+                detail="We couldn't cancel this just now, so nothing has changed. Please try again in a moment.",
+            ) from None
         except DatabaseUnavailableError:
             raise HTTPException(status_code=503, detail="Booking is unavailable.") from None
 

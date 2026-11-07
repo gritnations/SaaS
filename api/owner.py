@@ -371,7 +371,7 @@ class OwnerBookingOut(BaseModel):
         customer_phone: Customer phone, or ``None``.
         customer_note: Customer's note, or ``None``.
         created_at: When it was booked, ISO 8601.
-        payment_status: ``not_required``, ``awaiting`` or ``paid``.
+        payment_status: ``not_required``, ``awaiting``, ``paid`` or ``refunded``.
     """
 
     reference: str

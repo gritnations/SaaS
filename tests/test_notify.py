@@ -139,3 +139,42 @@ def test_the_calendar_identifier_uses_the_sending_domain() -> None:
     """The event identifier follows the configured sender, not a fixed domain."""
     message = customer_message(BASE, "mail.example.com")
     assert b"UID:ZA2JBN2C5B@mail.example.com" in message.attachments[0].content
+
+
+CANCELLED = dataclasses.replace(
+    BASE, kind="cancelled", cancelled_by="customer", payment_status="refunded", price_minor=1500, currency="GBP"
+)
+
+
+def test_a_refunded_cancellation_tells_the_customer_the_card_payment_was_refunded() -> None:
+    """The customer's email names the amount, says it is refunded in full, and promises no timing."""
+    message = customer_message(CANCELLED)
+    assert "Your card payment of £15.00 has been refunded in full." in message.text
+    assert "depends on your bank" in message.text
+    assert "days" not in message.text.split("Refund", 1)[1]
+
+
+def test_a_refunded_cancellation_tells_the_business_there_is_nothing_to_do() -> None:
+    """The business's email says the refund was made, so it does not refund by hand."""
+    message = owner_message(CANCELLED)
+    assert message is not None
+    assert "card payment of £15.00 was refunded in full" in message.text
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"payment_status": "paid"},
+        {"payment_status": "at_venue"},
+        {"payment_status": "not_required"},
+        {"kind": "confirmed"},
+        {"price_minor": 0},
+    ],
+)
+def test_no_refund_is_mentioned_unless_a_card_payment_was_refunded(change: dict[str, object]) -> None:
+    """Free, pay-at-venue, still-paid and non-cancellation emails never mention a refund."""
+    context = dataclasses.replace(CANCELLED, **change)  # type: ignore[arg-type]
+    owner = owner_message(context)
+    for message in (customer_message(context), owner):
+        assert message is not None
+        assert "refunded" not in message.text.lower()

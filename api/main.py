@@ -309,7 +309,7 @@ def create_api(
         if owners is None:
             owners = OwnerService(probe, notifier=notifier)
         if manage is None:
-            manage = ManageService(probe, notifier=notifier)
+            manage = ManageService(probe, notifier=notifier, refunds=stripe_provider)
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))

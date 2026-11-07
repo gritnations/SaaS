@@ -20,6 +20,7 @@ from api.main import create_api
 from booking.manage import ManagedBooking, TooLateError
 from booking.service import Business, InvalidSlotError, NotFoundError, Service, SlotTakenError
 from main import create_app
+from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
 
 LONDON = ZoneInfo("Europe/London")
@@ -184,6 +185,45 @@ def test_manage_outcomes_map_to_http_answers(outcome: Exception, status: int) ->
     assert response.status_code == status
     if status == 404:
         assert response.json() == {"detail": "Booking not found."}
+
+
+def test_a_refund_that_could_not_be_made_leaves_the_booking_alone_and_says_so() -> None:
+    """The customer is told nothing changed and to try again, with no provider detail."""
+    outcome = ProviderUnavailableError("Stripe could not refund the booking.")
+    response = client_for(FakeManage(fail_with=outcome)).post(f"{PATH}/cancel", json={"token": TOKEN})
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "We couldn't cancel this just now, so nothing has changed. Please try again in a moment."
+    }
+
+
+@pytest.mark.parametrize(
+    ("payment_status", "paid_online", "refunded"),
+    [("not_required", False, False), ("at_venue", False, False), ("paid", True, False), ("refunded", False, True)],
+)
+def test_the_booking_shows_whether_its_card_payment_is_paid_or_refunded(
+    payment_status: str, paid_online: bool, refunded: bool
+) -> None:
+    """The page can say a card payment will be refunded, or has been, and only for those bookings."""
+
+    class Paid(FakeManage):
+        """A manage service whose booking has the payment status under test."""
+
+        def view(self, slug: str, reference: str, token: str) -> ManagedBooking:
+            """Answer a view with the booking in the payment status under test.
+
+            Args:
+                slug: Business slug.
+                reference: Reference.
+                token: Code.
+
+            Returns:
+                The booking.
+            """
+            return dataclasses.replace(MANAGED, payment_status=payment_status)
+
+    body = client_for(Paid()).post(f"{PATH}/manage", json={"token": TOKEN}).json()
+    assert (body["paid_online"], body["refunded"]) == (paid_online, refunded)
 
 
 def test_move_passes_the_new_date_and_time() -> None:
