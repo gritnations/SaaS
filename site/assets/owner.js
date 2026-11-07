@@ -284,10 +284,11 @@ export async function startOwnerPage(current) {
 export function bookingChip(b, currency) {
   const price = money(b.price_minor, currency);
   if (b.status === "cancelled") {
+    const refunded = b.payment_status === "refunded";
     return el(
       "span",
-      { class: "chip cancelled" },
-      b.payment_status === "refunded" ? "Cancelled, refunded" : "Cancelled",
+      { class: refunded ? "chip cancelled refunded" : "chip cancelled" },
+      refunded ? "Cancelled, refunded" : "Cancelled",
     );
   }
   if (b.status === "pending_payment" || b.payment_status === "awaiting") {

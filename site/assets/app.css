@@ -483,6 +483,11 @@ body.app {
   text-decoration: line-through;
 }
 
+/* A refunded cancellation is not crossed out: the money went back, and a strikethrough reads as "not refunded". */
+.chip.cancelled.refunded {
+  text-decoration: none;
+}
+
 .pad {
   padding: 20px;
   margin: 0;
