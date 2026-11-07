@@ -366,6 +366,33 @@ class StripeProvider:
             raise self._unavailable("refund the plan", exc) from None
         return last.quote
 
+    def refund_booking(self, account_id: str, payment_id: str, reference: str) -> None:
+        """Refund a booking's payment in full on the business's account. A booking is never refunded twice.
+
+        An existing refund for the booking is found first; the request is also idempotent per reference.
+
+        Args:
+            account_id: The business's payment account, where the payment was taken.
+            payment_id: The payment (a Stripe PaymentIntent) to refund.
+            reference: The booking reference, recorded on the refund.
+
+        Raises:
+            ProviderUnavailableError: If Stripe refused or could not be reached.
+        """
+        options: Any = {"stripe_account": account_id}
+        try:
+            listing = self._client.v1.refunds.list({"payment_intent": payment_id, "limit": 20}, options)
+            for existing in listing.data:
+                if getattr(existing.metadata, "booking_reference", None) == reference:
+                    return
+            self._client.v1.refunds.create(
+                {"payment_intent": payment_id, "metadata": {"booking_reference": reference}},
+                {"stripe_account": account_id, "idempotency_key": f"booking-refund-{reference}"},
+            )
+        except stripe.StripeError as exc:
+            raise self._unavailable("refund the booking", exc) from None
+        LOGGER.info("stripe booking refunded reference=%s", reference)
+
     def create_checkout(self, order_reference: str) -> CheckoutSession:
         """Refuse a checkout started from a bare order reference.
 

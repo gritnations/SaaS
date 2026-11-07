@@ -274,6 +274,24 @@ class HostedCheckout:
 
 
 @runtime_checkable
+class BookingRefunds(Protocol):
+    """A provider that can give a customer's booking payment back, on the business's own account."""
+
+    def refund_booking(self, account_id: str, payment_id: str, reference: str) -> None:
+        """Refund a booking's payment in full. Safe to repeat: a booking is never refunded twice.
+
+        Args:
+            account_id: The business's payment account, where the payment was taken.
+            payment_id: The payment to refund.
+            reference: The booking reference, recorded on the refund.
+
+        Raises:
+            ProviderUnavailableError: If the provider refused or could not be reached.
+        """
+        ...
+
+
+@runtime_checkable
 class AccountPayments(Protocol):
     """A provider through which each business takes payments into its own account.
 

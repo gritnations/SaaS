@@ -59,7 +59,7 @@ class Context:
         cancelled_by: ``customer``, ``owner`` or ``None``.
         sequence: How many times the booking has been moved, for calendar updates.
         manage_url: The private manage link, or ``None`` when it cannot be included.
-        payment_status: ``not_required``, ``awaiting``, ``paid`` or ``at_venue``.
+        payment_status: ``not_required``, ``awaiting``, ``paid``, ``at_venue`` or ``refunded``.
         price_minor: The booking's price in minor units.
         currency: The business's ISO 4217 currency.
     """
@@ -114,6 +114,28 @@ def payment_row(context: Context) -> tuple[str, str] | None:
         return None
     symbol = {"GBP": "£", "EUR": "€", "USD": "$"}.get(context.currency, context.currency + " ")
     return ("Payment", f"Pay at the venue: {symbol}{context.price_minor / 100:.2f}")
+
+
+def refund_row(context: Context, for_business: bool) -> tuple[str, str] | None:
+    """Describe a refund of the card payment, for a booking its customer cancelled.
+
+    Args:
+        context: The event.
+        for_business: Whether the row is for the business's email rather than the customer's.
+
+    Returns:
+        A ``("Refund", text)`` row, or ``None`` when no card payment was refunded.
+    """
+    if context.kind != "cancelled" or context.payment_status != "refunded" or context.price_minor <= 0:
+        return None
+    symbol = {"GBP": "£", "EUR": "€", "USD": "$"}.get(context.currency, context.currency + " ")
+    amount = f"{symbol}{context.price_minor / 100:.2f}"
+    if for_business:
+        return ("Refund", f"The customer's card payment of {amount} was refunded in full. Nothing more to do.")
+    return (
+        "Refund",
+        f"Your card payment of {amount} has been refunded in full. How soon it shows on your statement depends on your bank.",
+    )
 
 
 def when_text(context: Context) -> str:
@@ -258,6 +280,9 @@ def customer_message(context: Context, sender_domain: str = "example.com") -> Me
     venue = payment_row(context)
     if venue and context.kind != "cancelled":
         rows.append(venue)
+    refund = refund_row(context, for_business=False)
+    if refund:
+        rows.append(refund)
     if context.meeting_link and context.kind != "cancelled":
         rows.append(("Meeting link", context.meeting_link))
     link = ("Manage your booking", context.manage_url) if context.manage_url and context.kind != "cancelled" else None
@@ -315,6 +340,9 @@ def owner_message(context: Context) -> Message | None:
     venue = payment_row(context)
     if venue and context.kind != "cancelled":
         rows.append(venue)
+    refund = refund_row(context, for_business=True)
+    if refund:
+        rows.append(refund)
     title = f"{verb}: {context.customer_name}"
     intro = f"{verb} for {context.business_name}."
     footer = "Reply to this email to contact the customer."

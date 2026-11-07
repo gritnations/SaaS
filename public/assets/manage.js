@@ -144,7 +144,9 @@ async function confirmCancel() {
   if (answer.ok) {
     state.booking = answer.data;
     state.mode = "view";
-    state.message = "Your booking is cancelled. We've emailed a confirmation.";
+    state.message = answer.data.refunded
+      ? "Your booking is cancelled and your card payment has been refunded in full. We've emailed a confirmation."
+      : "Your booking is cancelled. We've emailed a confirmation.";
   } else {
     state.problem = failure(answer, "This booking can no longer be cancelled online.");
   }
@@ -251,6 +253,7 @@ function cancelPanel() {
     { class: "panel stack tight", "aria-labelledby": "cancel-h" },
     el("h2", { id: "cancel-h" }, "Cancel this booking?"),
     el("p", { class: "muted" }, `${b.service.name} on ${dateParts(b.date).long}, ${b.label}. This can't be undone.`),
+    b.paid_online ? el("p", { class: "muted" }, "You paid by card, so your payment will be refunded in full.") : null,
     el(
       "div",
       { class: "btn-row split" },

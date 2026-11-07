@@ -185,7 +185,7 @@ class OwnerBooking:
         customer_phone: Customer phone, if given.
         customer_note: Customer's note, if given.
         created_at: When the booking was made.
-        payment_status: ``not_required``, ``awaiting`` or ``paid``.
+        payment_status: ``not_required``, ``awaiting``, ``paid`` or ``refunded``.
     """
 
     reference: str
