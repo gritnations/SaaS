@@ -396,13 +396,14 @@ class PaymentService:
                 with connection.transaction():
                     connection.execute(
                         "UPDATE bookings SET status = 'confirmed', payment_status = 'paid', checkout_id = %s, "
-                        "payment_id = %s, manage_token_hash = %s WHERE id = %s",
-                        (event.checkout_id, event.payment_id, hash_token(token), booking_id),
+                        "payment_id = %s, payment_provider = %s, manage_token_hash = %s WHERE id = %s",
+                        (event.checkout_id, event.payment_id, event.provider, hash_token(token), booking_id),
                     )
             except errors.ExclusionViolation:
                 connection.execute(
-                    "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s WHERE id = %s",
-                    (event.checkout_id, event.payment_id, booking_id),
+                    "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s, "
+                    "payment_provider = %s WHERE id = %s",
+                    (event.checkout_id, event.payment_id, event.provider, booking_id),
                 )
                 LOGGER.error(
                     "payment arrived after the hold ran out and the time was taken: refund reference=%s", reference

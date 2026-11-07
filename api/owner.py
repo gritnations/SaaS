@@ -42,6 +42,7 @@ from booking.owner import (
     TimeOff,
 )
 from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
+from booking.refunds import RefundUnavailableError
 from booking.service import Business, NotFoundError
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
@@ -1055,7 +1056,8 @@ def build_router(
             Its result.
 
         Raises:
-            HTTPException: 404 not found, 409 conflict, 422 invalid change, 503 database unreachable.
+            HTTPException: 404 not found, 409 conflict (including a refund that cannot be made automatically),
+                422 invalid change, 503 database or payment provider unreachable.
         """
         try:
             return call()
@@ -1065,6 +1067,12 @@ def build_router(
             raise HTTPException(status_code=409, detail=str(exc)) from None
         except InvalidChangeError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        except RefundUnavailableError:
+            raise HTTPException(
+                status_code=409,
+                detail="This booking was paid online and the refund can't be made automatically, "
+                "so it has not been cancelled. Refund it with your payment provider first.",
+            ) from None
         except DatabaseUnavailableError:
             raise HTTPException(status_code=503, detail="The dashboard is unavailable.") from None
 
@@ -1309,7 +1317,13 @@ def build_router(
         Returns:
             The booking after the change.
         """
-        found, item = answer(lambda: service().cancel_booking(who, business, reference))
+        try:
+            found, item = answer(lambda: service().cancel_booking(who, business, reference))
+        except ProviderUnavailableError:
+            raise HTTPException(
+                status_code=503,
+                detail="We couldn't cancel this just now, so nothing has changed. Please try again in a moment.",
+            ) from None
         return _booking_out(found, item)
 
     def payment_answer(call: Callable[[], T]) -> T:

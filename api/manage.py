@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from api.booking import ServiceOut, Slug
 from booking.availability import session_label
 from booking.manage import ManagedBooking, TooLateError
+from booking.refunds import RefundUnavailableError
 from booking.service import InvalidSlotError, NotFoundError, SlotTakenError
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
@@ -209,6 +210,12 @@ def build_router(backend: Callable[[], ManageBackend | None]) -> APIRouter:
             raise HTTPException(status_code=404, detail="Booking not found.") from None
         except (TooLateError, InvalidSlotError, SlotTakenError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        except RefundUnavailableError:
+            raise HTTPException(
+                status_code=409,
+                detail="This booking can't be cancelled online because the refund can't be made automatically. "
+                "Please contact the business.",
+            ) from None
         except ProviderUnavailableError:
             raise HTTPException(
                 status_code=503,

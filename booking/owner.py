@@ -12,6 +12,7 @@ Customer details leave the database only through this module, and only to a memb
 
 import re
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
@@ -20,6 +21,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 from psycopg import errors
 
+from booking.refunds import refund_paid_booking
 from booking.service import (
     TRIAL_DAYS,
     BookingError,
@@ -28,6 +30,7 @@ from booking.service import (
     NotFoundError,
     online_payments_allowed,
 )
+from payments.base import BookingRefunds
 from postgres import Database
 
 MAX_DAYS_PER_REQUEST = 62
@@ -301,15 +304,23 @@ _SERVICE_COLUMNS = "slug, name, duration_minutes, price_minor, active, sort_orde
 class OwnerService:
     """Owner operations backed by PostgreSQL."""
 
-    def __init__(self, database: Database, notifier: BookingNotifier | None = None) -> None:
+    def __init__(
+        self,
+        database: Database,
+        notifier: BookingNotifier | None = None,
+        refunds: Mapping[str, BookingRefunds] | None = None,
+    ) -> None:
         """Create the service. Performs no I/O.
 
         Args:
             database: The database boundary.
             notifier: Sends booking emails after an owner change is committed. ``None`` sends nothing.
+            refunds: Refund adapters by gateway name, to give a paid booking's payment back when the business
+                cancels it. ``None`` means a paid booking cannot be cancelled here.
         """
         self._database = database
         self._notifier = notifier
+        self._refunds = refunds
 
     @staticmethod
     def _member_business(connection: psycopg.Connection[Any], account: str, slug: str) -> Business:
@@ -847,7 +858,9 @@ class OwnerService:
     def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
         """Cancel a booking on the business's behalf. No deadline applies; the customer is emailed.
 
-        Cancelling an already cancelled booking changes nothing and sends nothing.
+        A booking paid online is refunded in full first, through the gateway that took the payment; if that
+        fails, the booking is left as it was. Cancelling an already cancelled booking changes nothing and sends
+        nothing.
 
         Args:
             account: The verified account identifier.
@@ -859,17 +872,32 @@ class OwnerService:
 
         Raises:
             NotFoundError: If the account does not manage the business, or it has no such booking.
+            booking.refunds.RefundUnavailableError: If a paid booking cannot be refunded automatically.
+            payments.base.ProviderUnavailableError: If the refund failed. Nothing was changed; a repeat is safe.
         """
         wanted = reference.strip().upper()
         if not REFERENCE_PATTERN.match(wanted):
             raise NotFoundError("Booking not found.")
         with self._database.connection() as connection:
             business = self._member_business(connection, account, slug)
-            changed: Any = connection.execute(
-                "UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'owner' "
-                "WHERE business_id = %s AND reference = %s AND status = 'confirmed' RETURNING id::text",
+            locked: Any = connection.execute(
+                "SELECT b.id::text, b.payment_status, b.payment_provider, b.payment_id, z.payment_account_id "
+                "FROM bookings b JOIN businesses z ON z.id = b.business_id "
+                "WHERE b.business_id = %s AND b.reference = %s AND b.status = 'confirmed' FOR UPDATE OF b",
                 (business.id, wanted),
             ).fetchone()
+            changed: Any = None
+            if locked is not None:
+                paid = locked[1] == "paid"
+                if paid:
+                    # The refund comes first: a failed refund leaves the booking untouched, and a repeat is safe.
+                    refund_paid_booking(self._refunds, locked[2], locked[4], locked[3], wanted)
+                changed = connection.execute(
+                    "UPDATE bookings SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'owner', "
+                    "payment_status = CASE WHEN %s THEN 'refunded' ELSE payment_status END "
+                    "WHERE id = %s RETURNING id::text",
+                    (paid, locked[0]),
+                ).fetchone()
             row = connection.execute(
                 f"SELECT {_BOOKING_COLUMNS} FROM bookings b JOIN services s ON s.id = b.service_id "
                 "WHERE b.business_id = %s AND b.reference = %s",

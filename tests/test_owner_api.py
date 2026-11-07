@@ -547,3 +547,57 @@ def test_owner_answers_are_never_cached() -> None:
     """Responses carrying customer details are marked no-store."""
     response = signed_in().get("/owner/businesses/example/bookings?start=2026-10-19", headers=GOOD)
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_a_paid_booking_that_cannot_be_refunded_automatically_is_not_cancelled_and_says_why() -> None:
+    """The owner is told to refund with the payment provider first (409)."""
+    from booking.refunds import RefundUnavailableError
+
+    class Refusing(FakeOwners):
+        """Owners whose cancel cannot refund."""
+
+        def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
+            """Refuse the cancel.
+
+            Args:
+                account: The account.
+                slug: Business slug.
+                reference: Reference.
+
+            Raises:
+                RefundUnavailableError: Always.
+            """
+            raise RefundUnavailableError("This booking was paid online and cannot be refunded automatically.")
+
+    response = client_for(Refusing(), FakeVerifier()).post(
+        "/owner/businesses/example/bookings/ZA2JBN2C5B/cancel", headers=GOOD
+    )
+    assert response.status_code == 409
+    assert "Refund it with your payment provider first." in response.json()["detail"]
+
+
+def test_a_refund_that_failed_leaves_the_booking_alone_and_asks_to_try_again() -> None:
+    """The owner is told nothing changed (503), with no provider detail."""
+    from payments.base import ProviderUnavailableError
+
+    class Failing(FakeOwners):
+        """Owners whose refund fails."""
+
+        def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
+            """Fail the cancel.
+
+            Args:
+                account: The account.
+                slug: Business slug.
+                reference: Reference.
+
+            Raises:
+                ProviderUnavailableError: Always.
+            """
+            raise ProviderUnavailableError("Stripe could not refund the booking.")
+
+    response = client_for(Failing(), FakeVerifier()).post(
+        "/owner/businesses/example/bookings/ZA2JBN2C5B/cancel", headers=GOOD
+    )
+    assert response.status_code == 503
+    assert "nothing has changed" in response.json()["detail"]
