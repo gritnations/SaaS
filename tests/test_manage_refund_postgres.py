@@ -263,3 +263,16 @@ def test_the_owner_cancelling_an_unpaid_booking_asks_for_no_refund(world: World,
     refunds = FakeRefunds()
     owner_manager(world, refunds).cancel_booking(world.owner, world.slug, reference)
     assert refunds.calls == [] and stored(world, reference) == ("cancelled", status)
+
+
+def test_a_booking_already_refunded_by_hand_is_cancelled_without_a_second_refund(world: World) -> None:
+    """Once the payment is recorded as refunded, both cancels go ahead and ask the gateway for nothing."""
+    reference, token = book(world)
+    other, _ = book(world, "12:00")
+    for ref in (reference, other):
+        set_payment(world, ref, "refunded")
+    refunds = FakeRefunds()
+    manager(world, refunds).cancel(world.slug, reference, token)
+    owner_manager(world, refunds).cancel_booking(world.owner, world.slug, other)
+    assert refunds.calls == []
+    assert stored(world, reference) == ("cancelled", "refunded") and stored(world, other) == ("cancelled", "refunded")

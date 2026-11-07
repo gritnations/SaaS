@@ -366,3 +366,66 @@ def test_stripe_failures_become_the_boundary_error(call: str) -> None:
         else:
             adapter.can_take_payments(ACCOUNT)
     assert "sk_test" not in str(raised.value)
+
+
+def charge_event(change: dict[str, Any], account: str | None = ACCOUNT) -> bytes:
+    """Build a ``charge.refunded`` event body.
+
+    Args:
+        change: Fields of the charge to set or override.
+        account: The connected account it came from.
+
+    Returns:
+        The JSON body.
+    """
+    charge = {
+        "id": "ch_test_1",
+        "object": "charge",
+        "amount": 1200,
+        "currency": "gbp",
+        "payment_intent": "pi_test_1",
+        "refunded": True,
+        "amount_refunded": 1200,
+        **change,
+    }
+    payload = {
+        "id": "evt_test_2",
+        "object": "event",
+        "type": "charge.refunded",
+        "livemode": False,
+        "created": int(time.time()),
+        "api_version": "2026-08-26.dahlia",
+        "account": account,
+        "data": {"object": charge},
+    }
+    return json.dumps(payload).encode()
+
+
+def test_a_payment_refunded_in_full_is_reported_with_its_payment_and_account() -> None:
+    """The event names the payment and the business's account, and nothing about a booking."""
+    body = charge_event({})
+    parsed = provider().parse_webhook(sign(body), body)
+    assert (parsed.status, parsed.payment_id, parsed.account_id) == ("refunded", "pi_test_1", ACCOUNT)
+    assert (parsed.amount_minor, parsed.currency, parsed.order_reference) == (1200, "GBP", "")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"refunded": False, "amount_refunded": 500},
+        {"refunded": True, "amount_refunded": 500},
+        {"refunded": False, "amount_refunded": 1200},
+        {"payment_intent": None},
+        {"amount": 0, "amount_refunded": 0},
+    ],
+)
+def test_a_partial_or_unattached_refund_needs_no_action(change: dict[str, Any]) -> None:
+    """Only a payment refunded in full counts; anything else is verified and ignored."""
+    body = charge_event(change)
+    assert provider().parse_webhook(sign(body), body).status == "ignored"
+
+
+def test_a_refund_notification_from_the_platform_account_is_ignored() -> None:
+    """A refund event without a business account is not trusted on the business destination's secret."""
+    body = charge_event({}, account=None)
+    assert provider().parse_webhook(sign(body), body).status == "ignored"

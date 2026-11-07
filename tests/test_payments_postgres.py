@@ -485,3 +485,30 @@ def test_racing_requests_for_one_paid_session_make_exactly_one_hold(world: World
     assert len(world.provider.orders) == 1
     assert row(world, holds[0][0])[:2] == ("pending_payment", "awaiting")
     assert "10:00" not in free_times(world)
+
+
+def test_a_payment_refunded_in_full_outside_the_product_marks_the_booking_refunded(world: World) -> None:
+    """The booking stays confirmed; only its payment status changes; a repeat or another account does nothing."""
+    reference, _ = book(world)
+    assert world.payments.record(paid(world, reference)) is True
+    refund = PaymentEvent(
+        provider="stripe", order_reference="", status="refunded", live=False, account_id=account(world),
+        amount_minor=2500, currency="GBP", payment_id="pi_test_1",
+    )  # fmt: skip
+    assert world.payments.record(replace(refund, account_id="acct_other")) is False
+    assert world.payments.record(replace(refund, payment_id="pi_unknown")) is False
+    assert world.payments.record(replace(refund, provider="other")) is False
+    assert row(world, reference)[:2] == ("confirmed", "paid")
+    assert world.payments.record(refund) is True
+    assert row(world, reference)[:2] == ("confirmed", "refunded")
+    assert world.payments.record(refund) is False
+
+
+def test_a_refund_event_without_its_payment_or_account_does_nothing(world: World) -> None:
+    """An incomplete event never matches a booking."""
+    reference, _ = book(world)
+    world.payments.record(paid(world, reference))
+    incomplete = PaymentEvent(provider="stripe", order_reference="", status="refunded", live=False)
+    assert world.payments.record(incomplete) is False
+    assert world.payments.record(replace(incomplete, payment_id="pi_test_1")) is False
+    assert row(world, reference)[:2] == ("confirmed", "paid")

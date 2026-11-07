@@ -81,8 +81,8 @@ class PaymentEvent:
     Attributes:
         provider: The name of the provider that sent the notification.
         order_reference: The order the notification is about.
-        status: The reported outcome: ``"paid"``, ``"failed"``, ``"expired"``, or ``"ignored"`` for a
-            verified notification that needs no action. For a business's own subscription to a plan:
+        status: The reported outcome: ``"paid"``, ``"failed"``, ``"expired"``, ``"refunded"`` (a payment
+            was refunded in full), or ``"ignored"`` for a verified notification that needs no action. For a business's own subscription to a plan:
             ``"subscription_active"``, ``"subscription_past_due"`` or ``"subscription_ended"``.
         live: ``True`` only when the event describes real money.
         checkout_id: The provider's checkout identifier, when the notification is about a checkout.
