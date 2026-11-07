@@ -575,6 +575,8 @@ class StripeProvider:
             return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
         if not from_businesses:
             return self._subscription_event(event, live)
+        if event.type == "charge.refunded":
+            return self._refund_event(event, live, account_id)
         if event.type not in (*_PAID_EVENTS, "checkout.session.async_payment_failed", "checkout.session.expired"):
             return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
         data = event.data.object
@@ -599,6 +601,38 @@ class StripeProvider:
             amount_minor=amount if isinstance(amount, int) else None,
             currency=currency.upper() if currency else None,
             payment_id=_text(payment) or (_text(payment.get("id")) if isinstance(payment, dict) else None),
+        )
+
+    def _refund_event(self, event: Any, live: bool, account_id: str | None) -> PaymentEvent:
+        """Read a refund from a verified notification from a business's account.
+
+        Only a payment refunded in full is reported as ``"refunded"``; a partial refund needs no action.
+
+        Args:
+            event: The verified event.
+            live: Whether it describes real money.
+            account_id: The business's payment account it came from.
+
+        Returns:
+            The event, or one with status ``"ignored"`` when the payment is not fully refunded.
+        """
+        data = event.data.object
+        charge: dict[str, Any] = data.to_dict() if hasattr(data, "to_dict") else {}
+        amount, refunded = charge.get("amount"), charge.get("amount_refunded")
+        payment = _text(charge.get("payment_intent"))
+        full = charge.get("refunded") is True and isinstance(amount, int) and amount > 0 and refunded == amount
+        if not full or payment is None:
+            return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
+        currency = _text(charge.get("currency"))
+        return PaymentEvent(
+            provider=self.name,
+            order_reference="",
+            status="refunded",
+            live=live,
+            account_id=account_id,
+            amount_minor=amount,
+            currency=currency.upper() if currency else None,
+            payment_id=payment,
         )
 
     def _subscription_event(self, event: Any, live: bool) -> PaymentEvent:

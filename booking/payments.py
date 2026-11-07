@@ -347,6 +347,34 @@ class PaymentService:
             payment_account, f"{self._site_url}/#payments=done", f"{self._site_url}/#payments=retry"
         )
 
+    def _record_refund(self, event: PaymentEvent) -> bool:
+        """Mark a booking refunded when its payment was refunded in full outside the product.
+
+        The booking's own status is not touched: a refunded payment does not cancel the appointment. A booking
+        that is not paid, or whose payment, account or gateway does not match, is left alone.
+
+        Args:
+            event: A verified refund event, with the payment and the account it came from.
+
+        Returns:
+            ``True`` when a booking changed.
+
+        Raises:
+            postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
+        """
+        if not event.payment_id or not event.account_id:
+            return False
+        with self._database.connection() as connection:
+            result = connection.execute(
+                "UPDATE bookings b SET payment_status = 'refunded' FROM businesses z "
+                "WHERE z.id = b.business_id AND b.payment_id = %s AND z.payment_account_id = %s "
+                "AND b.payment_provider = %s AND b.payment_status = 'paid'",
+                (event.payment_id, event.account_id, event.provider),
+            )
+        if result.rowcount == 1:
+            LOGGER.info("booking payment refunded in full outside the product provider=%s", event.provider)
+        return result.rowcount == 1
+
     def record(self, event: PaymentEvent) -> bool:
         """Apply a verified payment event to its booking.
 
@@ -359,6 +387,8 @@ class PaymentService:
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
         """
+        if event.status == "refunded":
+            return self._record_refund(event)
         if event.status not in ("paid", "expired", "failed") or not event.checkout_id:
             return False
         token: str | None = None
