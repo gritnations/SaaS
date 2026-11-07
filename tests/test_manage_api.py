@@ -18,6 +18,7 @@ from test_owner_api import GOOD, FakeOwners, FakeVerifier
 
 from api.main import create_api
 from booking.manage import ManagedBooking, TooLateError
+from booking.refunds import RefundUnavailableError
 from booking.service import Business, InvalidSlotError, NotFoundError, Service, SlotTakenError
 from main import create_app
 from payments.base import ProviderUnavailableError
@@ -195,6 +196,14 @@ def test_a_refund_that_could_not_be_made_leaves_the_booking_alone_and_says_so() 
     assert response.json() == {
         "detail": "We couldn't cancel this just now, so nothing has changed. Please try again in a moment."
     }
+
+
+def test_a_booking_that_cannot_be_refunded_automatically_stays_booked_and_points_to_the_business() -> None:
+    """The customer is told to contact the business, with no provider detail."""
+    outcome = RefundUnavailableError("This booking was paid online and cannot be refunded automatically.")
+    response = client_for(FakeManage(fail_with=outcome)).post(f"{PATH}/cancel", json={"token": TOKEN})
+    assert response.status_code == 409
+    assert "Please contact the business." in response.json()["detail"]
 
 
 @pytest.mark.parametrize(

@@ -66,7 +66,12 @@ function details(b) {
     const ask = el(
       "div",
       { class: "confirm", hidden: true },
-      el("p", { class: "small" }, `Cancel ${b.customer_name}'s booking? They'll get an email saying it's cancelled.`),
+      el(
+        "p",
+        { class: "small" },
+        `Cancel ${b.customer_name}'s booking? They'll get an email saying it's cancelled.` +
+          (b.payment_status === "paid" ? " Their card payment will be refunded in full." : ""),
+      ),
       el("div", { class: "row" }, confirm, keep),
     );
     const start = el("button", { type: "button", class: "chip-btn" }, "Cancel this booking");
@@ -90,7 +95,10 @@ function details(b) {
       }
       confirm.disabled = false;
       confirm.textContent = "Yes, cancel it";
-      message.textContent = "The booking couldn't be cancelled right now. Please try again.";
+      message.textContent =
+        result.data && typeof result.data.detail === "string"
+          ? result.data.detail
+          : "The booking couldn't be cancelled right now. Please try again.";
     });
     box.append(start, ask, message);
   }

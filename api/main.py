@@ -300,6 +300,7 @@ def create_api(
         pages_url = site_url_from_environment(env, PAGES_URL_ENV)
         links = CustomerLinks(pages_url, pages=True) if pages_url else site_url
         notifier = Notifier(probe, mailer_from_environment(env), links, sender_domain(env))
+        refunds = {stripe_provider.name: stripe_provider} if stripe_provider is not None else {}
         if bookings is None:
             bookings = BookingService(probe, notifier=notifier, payments=stripe_provider, site_url=links)
         if payments is None and stripe_provider is not None and site_url is not None:
@@ -307,9 +308,9 @@ def create_api(
         if billing is None and stripe_provider is not None and stripe_provider.bills_plans and site_url is not None:
             billing = BillingService(probe, stripe_provider, site_url)
         if owners is None:
-            owners = OwnerService(probe, notifier=notifier)
+            owners = OwnerService(probe, notifier=notifier, refunds=refunds)
         if manage is None:
-            manage = ManageService(probe, notifier=notifier, refunds=stripe_provider)
+            manage = ManageService(probe, notifier=notifier, refunds=refunds)
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))

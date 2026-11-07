@@ -292,6 +292,25 @@ def paid(world: World, reference: str, **change: object) -> PaymentEvent:
     return replace(base, **change)  # type: ignore[arg-type]
 
 
+def provider_of(world: World, reference: str) -> str | None:
+    """Read the gateway recorded as having taken a booking's payment.
+
+    Args:
+        world: The test business.
+        reference: The booking.
+
+    Returns:
+        The gateway name, or ``None``.
+    """
+    with world.database.connection() as connection:
+        found = connection.execute(
+            "SELECT payment_provider FROM bookings WHERE reference = %s", (reference,)
+        ).fetchone()
+    assert found is not None
+    provider: str | None = found[0]
+    return provider
+
+
 def free_times(world: World) -> set[str]:
     """List the available times of the paid service on the test day.
 
@@ -333,6 +352,7 @@ def test_a_matching_payment_confirms_the_booking_once(world: World) -> None:
     assert world.payments.record(paid(world, reference)) is True
     assert row(world, reference)[:2] == ("confirmed", "paid")
     assert row(world, reference)[3] is True
+    assert provider_of(world, reference) == "stripe"
     [(kind, _, token)] = world.notifier.events
     assert kind == "confirmed" and token is not None and len(token) == 48
     assert world.payments.record(paid(world, reference)) is False
@@ -374,6 +394,7 @@ def test_a_hold_that_ran_out_frees_its_time_and_a_late_payment_is_kept_for_refun
     assert row(world, late)[0] == "expired"
     assert world.payments.record(paid(world, late)) is True
     assert row(world, late)[:2] == ("expired", "paid")
+    assert provider_of(world, late) == "stripe"
     assert row(world, taker)[0] == "confirmed"
     _, listed = OwnerService(world.database).bookings(world.owner, world.slug, world.day, 1)
     assert {(b.reference, b.status, b.payment_status) for b in listed} == {
