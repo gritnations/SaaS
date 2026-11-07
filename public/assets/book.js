@@ -590,7 +590,7 @@ function returnSection() {
     el(
       "p",
       {},
-      "You left the payment page, so this booking isn't confirmed and nothing was charged. The time is released within 30 minutes.",
+      "You left the payment page, so this booking isn't confirmed and nothing was charged. The time is released within 36 minutes.",
     ),
     el("button", { type: "button", class: "btn", onclick: restart }, "Choose a time"),
   );
