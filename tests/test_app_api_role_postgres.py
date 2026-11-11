@@ -95,7 +95,10 @@ def test_the_role_has_exactly_the_privileges_the_code_uses(
         for table in tables
     }
     assert {table: privileges for table, privileges in held.items() if privileges} == EXPECTED
-    assert set(held) == set(EXPECTED), "a table exists that this test and migration 0014 do not know about"
+    # The migration ledger (0015) is owner-only: it may exist, and the loop above already shows it holds nothing.
+    assert set(held) - {"schema_migrations"} == set(
+        EXPECTED
+    ), "a table exists that this test and migration 0014 do not know about"
 
 
 def test_the_role_has_no_powers_beyond_its_tables(owner_connection: psycopg.Connection[tuple[object, ...]]) -> None:
