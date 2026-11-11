@@ -22,12 +22,17 @@ jobs:
               required_status_checks: {
                 strict: false,
                 checks: [
-                  { context: 'Functions (booking logic)' },
-                  { context: 'Admin panel (pure logic)' },
-                  { context: 'Firestore security rules (emulator)' },
+                  { context: 'Python platform (3.11)' },
+                  { context: 'Python platform (3.12)' },
+                  { context: 'Python platform (3.13)' },
+                  { context: 'Python platform (3.14)' },
+                  { context: 'Lint (ESLint, Prettier, Markdown)' },
                 ],
               },
               enforce_admins: false,
-              required_pull_request_reviews: null,
+              required_pull_request_reviews: {
+                required_approving_review_count: 1,
+                dismiss_stale_reviews: true,
+              },
               restrictions: null,
             });
