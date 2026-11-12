@@ -95,6 +95,19 @@ def test_two_bookings_cannot_hold_the_same_payment(pair_world: tuple[Connection,
         add_booking(connection, business, service, 11, "stripe", "pi_pair_1")
 
 
+def test_a_failed_ledger_row_leaves_no_index(owner_connection: Connection) -> None:  # noqa: F811
+    """If the ledger row cannot be written, the index is not left behind."""
+    exists = owner_connection.execute("SELECT to_regclass('public.bookings_payment_pair_key') IS NOT NULL").fetchone()
+    if exists is None or exists[0]:
+        pytest.skip("0016 is already applied, so there is nothing to apply here")
+    owner_connection.execute("INSERT INTO schema_migrations (version) VALUES ('0016_unique_payment_pair')")
+    with pytest.raises(errors.UniqueViolation):
+        with owner_connection.transaction():  # a savepoint inside the test's own transaction
+            owner_connection.execute(PAIR_FILE.read_text(encoding="utf-8"))
+    after = owner_connection.execute("SELECT to_regclass('public.bookings_payment_pair_key') IS NOT NULL").fetchone()
+    assert after is not None and not after[0]
+
+
 def test_the_same_identifier_from_another_gateway_is_allowed(pair_world: tuple[Connection, str, str]) -> None:
     """The pair is what is unique: gateways may reuse each other's identifiers."""
     connection, business, service = pair_world

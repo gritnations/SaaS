@@ -9,7 +9,13 @@
 -- The rule covers only bookings that have a payment identifier; free and pay-at-venue bookings have none and are
 -- not affected. It is checked against the staging data before this file is applied: no pair is repeated there.
 -- If a repeated pair exists in another database, this statement fails and nothing is changed.
+--
+-- Both statements run in one DO block, so they succeed or fail together, whichever tool applies the file.
 
-CREATE UNIQUE INDEX bookings_payment_pair_key ON bookings (payment_provider, payment_id) WHERE payment_id IS NOT NULL;
+DO $$
+BEGIN
+    CREATE UNIQUE INDEX bookings_payment_pair_key ON bookings (payment_provider, payment_id) WHERE payment_id IS NOT NULL;
 
-INSERT INTO schema_migrations (version) VALUES ('0016_unique_payment_pair');
+    INSERT INTO schema_migrations (version) VALUES ('0016_unique_payment_pair');
+END
+$$;
