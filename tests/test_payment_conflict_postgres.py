@@ -178,7 +178,8 @@ def test_a_payment_held_by_another_booking_is_reported_not_raised(
     with caplog.at_level(logging.ERROR, logger="booking.payments"):
         assert setup.service.record(setup.event("pi_conflict")) is False
     assert setup.state() == ("pending_payment", "awaiting", None)
-    assert "already belongs to another booking" in caplog.text
+    assert "conflicts with an existing booking" in caplog.text
+    assert "constraint=bookings_payment_pair_key" in caplog.text
     assert setup.waiting in caplog.text
 
 
@@ -199,7 +200,8 @@ def test_a_late_payment_held_by_another_booking_is_reported_not_raised(
     with caplog.at_level(logging.ERROR, logger="booking.payments"):
         assert setup.service.record(setup.event("pi_conflict")) is False
     assert setup.state() == ("expired", "awaiting", None)
-    assert "already belongs to another booking" in caplog.text
+    assert "conflicts with an existing booking" in caplog.text
+    assert "constraint=bookings_payment_pair_key" in caplog.text
 
 
 def test_an_ordinary_paid_event_still_confirms_in_the_same_setup(setup: Setup) -> None:

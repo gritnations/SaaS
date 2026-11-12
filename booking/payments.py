@@ -383,7 +383,7 @@ class PaymentService:
 
         Returns:
             ``True`` when a booking changed, ``False`` when the event needed nothing or did not match, including
-            a payment that already belongs to another booking (logged as an error for review).
+            a payment or checkout that conflicts with an existing booking (logged as an error for review).
 
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
@@ -438,23 +438,25 @@ class PaymentService:
                             "payment_provider = %s WHERE id = %s",
                             (event.checkout_id, event.payment_id, event.provider, booking_id),
                         )
-                except errors.UniqueViolation:
+                except errors.UniqueViolation as conflict:
                     LOGGER.error(
-                        "payment already belongs to another booking: needs review reference=%s provider=%s",
+                        "payment conflicts with an existing booking: needs review reference=%s provider=%s constraint=%s",
                         reference,
                         event.provider,
+                        conflict.diag.constraint_name,
                     )
                     return False
                 LOGGER.error(
                     "payment arrived after the hold ran out and the time was taken: refund reference=%s", reference
                 )
                 return True
-            except errors.UniqueViolation:
+            except errors.UniqueViolation as conflict:
                 # The savepoint is already rolled back. Retrying cannot succeed, so answer "nothing changed".
                 LOGGER.error(
-                    "payment already belongs to another booking: needs review reference=%s provider=%s",
+                    "payment conflicts with an existing booking: needs review reference=%s provider=%s constraint=%s",
                     reference,
                     event.provider,
+                    conflict.diag.constraint_name,
                 )
                 return False
         LOGGER.info("booking paid and confirmed reference=%s", reference)
