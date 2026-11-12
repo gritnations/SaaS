@@ -182,6 +182,26 @@ def test_a_payment_held_by_another_booking_is_reported_not_raised(
     assert setup.waiting in caplog.text
 
 
+def test_a_late_payment_held_by_another_booking_is_reported_not_raised(
+    setup: Setup, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The recovery path for a payment that arrives after its time was taken also answers ``False``."""
+    setup.connection.execute(
+        "UPDATE bookings SET status = 'expired', payment_status = 'awaiting' WHERE reference = %s", (setup.waiting,)
+    )
+    setup.connection.execute(
+        "INSERT INTO bookings (business_id, service_id, reference, status, starts_at, ends_at, blocked_until, "
+        "price_minor, customer_name, customer_email, payment_status) "
+        "SELECT business_id, service_id, %s, 'confirmed', starts_at, ends_at, blocked_until, 0, 'Sam', "
+        "'sam@example.com', 'not_required' FROM bookings WHERE reference = %s",
+        (secrets.token_hex(5).upper(), setup.waiting),
+    )
+    with caplog.at_level(logging.ERROR, logger="booking.payments"):
+        assert setup.service.record(setup.event("pi_conflict")) is False
+    assert setup.state() == ("expired", "awaiting", None)
+    assert "already belongs to another booking" in caplog.text
+
+
 def test_an_ordinary_paid_event_still_confirms_in_the_same_setup(setup: Setup) -> None:
     """With a payment no other booking holds, the booking is confirmed, so the test setup itself is sound."""
     assert setup.service.record(setup.event("pi_fresh")) is True
