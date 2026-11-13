@@ -382,7 +382,8 @@ class PaymentService:
             event: An event whose signature the provider adapter has verified.
 
         Returns:
-            ``True`` when a booking changed, ``False`` when the event needed nothing or did not match.
+            ``True`` when a booking changed, ``False`` when the event needed nothing or did not match, including
+            a payment or checkout that conflicts with an existing booking (logged as an error for review).
 
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
@@ -430,15 +431,34 @@ class PaymentService:
                         (event.checkout_id, event.payment_id, event.provider, hash_token(token), booking_id),
                     )
             except errors.ExclusionViolation:
-                connection.execute(
-                    "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s, "
-                    "payment_provider = %s WHERE id = %s",
-                    (event.checkout_id, event.payment_id, event.provider, booking_id),
-                )
+                try:
+                    with connection.transaction():
+                        connection.execute(
+                            "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s, "
+                            "payment_provider = %s WHERE id = %s",
+                            (event.checkout_id, event.payment_id, event.provider, booking_id),
+                        )
+                except errors.UniqueViolation as conflict:
+                    LOGGER.error(
+                        "payment conflicts with an existing booking: needs review reference=%s provider=%s constraint=%s",
+                        reference,
+                        event.provider,
+                        conflict.diag.constraint_name,
+                    )
+                    return False
                 LOGGER.error(
                     "payment arrived after the hold ran out and the time was taken: refund reference=%s", reference
                 )
                 return True
+            except errors.UniqueViolation as conflict:
+                # The savepoint is already rolled back. Retrying cannot succeed, so answer "nothing changed".
+                LOGGER.error(
+                    "payment conflicts with an existing booking: needs review reference=%s provider=%s constraint=%s",
+                    reference,
+                    event.provider,
+                    conflict.diag.constraint_name,
+                )
+                return False
         LOGGER.info("booking paid and confirmed reference=%s", reference)
         if self._notifier is not None:
             self._notifier.booking_event("confirmed", booking_id, token)
