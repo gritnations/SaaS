@@ -43,6 +43,9 @@ from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
 
+MAX_EVENT_ID = 255
+"""The longest provider event identifier that is recorded; the table refuses longer ones."""
+
 _BOOKING_QUERY = (
     "SELECT b.id::text, b.reference, b.status, b.payment_status, b.price_minor, z.currency, z.payment_account_id "
     "FROM bookings b JOIN businesses z ON z.id = b.business_id "
@@ -347,6 +350,33 @@ class PaymentService:
             payment_account, f"{self._site_url}/#payments=done", f"{self._site_url}/#payments=retry"
         )
 
+    @staticmethod
+    def _first_delivery(connection: psycopg.Connection[Any], event: PaymentEvent) -> bool:
+        """Record that the provider's event is being applied, unless it was applied before.
+
+        Call this inside a savepoint, in the same transaction as the booking change, and roll the savepoint back
+        when nothing changed, so that only an event that changed a booking is recorded.
+
+        Args:
+            connection: An open connection, inside the transaction that applies the event.
+            event: The verified event.
+
+        Returns:
+            ``False`` when this provider event identifier was recorded before, so the event must be ignored.
+            ``True`` when it is new, and also when the event has no usable identifier, in which case the
+            booking's own state is the only guard.
+        """
+        if not event.event_id or len(event.event_id) > MAX_EVENT_ID:
+            return True
+        result = connection.execute(
+            "INSERT INTO payment_events (provider, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (event.provider, event.event_id),
+        )
+        if result.rowcount != 1:
+            LOGGER.info("payment event already processed provider=%s", event.provider)
+            return False
+        return True
+
     def _record_refund(self, event: PaymentEvent) -> bool:
         """Mark a booking refunded when its payment was refunded in full outside the product.
 
@@ -365,12 +395,17 @@ class PaymentService:
         if not event.payment_id or not event.account_id:
             return False
         with self._database.connection() as connection:
-            result = connection.execute(
-                "UPDATE bookings b SET payment_status = 'refunded' FROM businesses z "
-                "WHERE z.id = b.business_id AND b.payment_id = %s AND z.payment_account_id = %s "
-                "AND b.payment_provider = %s AND b.payment_status = 'paid'",
-                (event.payment_id, event.account_id, event.provider),
-            )
+            with connection.transaction():
+                if not self._first_delivery(connection, event):
+                    return False
+                result = connection.execute(
+                    "UPDATE bookings b SET payment_status = 'refunded' FROM businesses z "
+                    "WHERE z.id = b.business_id AND b.payment_id = %s AND z.payment_account_id = %s "
+                    "AND b.payment_provider = %s AND b.payment_status = 'paid'",
+                    (event.payment_id, event.account_id, event.provider),
+                )
+                if result.rowcount != 1:
+                    raise psycopg.Rollback
         if result.rowcount == 1:
             LOGGER.info("booking payment refunded in full outside the product provider=%s", event.provider)
         return result.rowcount == 1
@@ -383,7 +418,8 @@ class PaymentService:
 
         Returns:
             ``True`` when a booking changed, ``False`` when the event needed nothing or did not match, including
-            a payment or checkout that conflicts with an existing booking (logged as an error for review).
+            a payment or checkout that conflicts with an existing booking (logged as an error for review), and
+            a provider event identifier that was already recorded. An event that changed a booking is recorded.
 
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
@@ -411,11 +447,16 @@ class PaymentService:
                 LOGGER.error("payment event does not match its booking reference=%s", reference)
                 return False
             if event.status != "paid":
-                result = connection.execute(
-                    "UPDATE bookings SET status = 'expired', checkout_id = %s "
-                    "WHERE id = %s AND status = 'pending_payment'",
-                    (event.checkout_id, booking_id),
-                )
+                with connection.transaction():
+                    if not self._first_delivery(connection, event):
+                        return False
+                    result = connection.execute(
+                        "UPDATE bookings SET status = 'expired', checkout_id = %s "
+                        "WHERE id = %s AND status = 'pending_payment'",
+                        (event.checkout_id, booking_id),
+                    )
+                    if result.rowcount != 1:
+                        raise psycopg.Rollback
                 return result.rowcount == 1
             if event.amount_minor != price or event.currency != currency:
                 LOGGER.error("payment amount or currency does not match reference=%s", reference)
@@ -425,6 +466,8 @@ class PaymentService:
             token = secrets.token_hex(MANAGE_TOKEN_BYTES)
             try:
                 with connection.transaction():
+                    if not self._first_delivery(connection, event):
+                        return False
                     connection.execute(
                         "UPDATE bookings SET status = 'confirmed', payment_status = 'paid', checkout_id = %s, "
                         "payment_id = %s, payment_provider = %s, manage_token_hash = %s WHERE id = %s",
@@ -433,6 +476,8 @@ class PaymentService:
             except errors.ExclusionViolation:
                 try:
                     with connection.transaction():
+                        if not self._first_delivery(connection, event):
+                            return False
                         connection.execute(
                             "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s, "
                             "payment_provider = %s WHERE id = %s",

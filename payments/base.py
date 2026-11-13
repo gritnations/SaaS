@@ -96,6 +96,8 @@ class PaymentEvent:
         ends_at: When a cancelled subscription will end, or ``None`` when it is not set to end. Only events
             about the subscription itself carry it; ``ends_known`` says whether this one does.
         ends_known: Whether the event reports the subscription's end date (``ends_at`` may still be ``None``).
+        event_id: The provider's own identifier for this notification, used to recognise a repeat. ``None`` when the
+            provider sends none, or the event is not about a booking.
     """
 
     provider: str
@@ -112,6 +114,7 @@ class PaymentEvent:
     plan: str | None = None
     ends_at: datetime | None = None
     ends_known: bool = False
+    event_id: str | None = None
 
 
 @dataclass(frozen=True)

@@ -601,6 +601,7 @@ class StripeProvider:
             amount_minor=amount if isinstance(amount, int) else None,
             currency=currency.upper() if currency else None,
             payment_id=_text(payment) or (_text(payment.get("id")) if isinstance(payment, dict) else None),
+            event_id=_text(getattr(event, "id", None)),
         )
 
     def _refund_event(self, event: Any, live: bool, account_id: str | None) -> PaymentEvent:
@@ -633,6 +634,7 @@ class StripeProvider:
             amount_minor=amount,
             currency=currency.upper() if currency else None,
             payment_id=payment,
+            event_id=_text(getattr(event, "id", None)),
         )
 
     def _subscription_event(self, event: Any, live: bool) -> PaymentEvent:
