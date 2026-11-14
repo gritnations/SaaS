@@ -256,6 +256,7 @@ def test_a_paid_checkout_notification_is_read_after_its_signature_verifies() -> 
         "GBP",
         "pi_test_1",
     )
+    assert parsed.event_id == "evt_test_1"
 
 
 @pytest.mark.parametrize(
@@ -407,6 +408,7 @@ def test_a_payment_refunded_in_full_is_reported_with_its_payment_and_account() -
     parsed = provider().parse_webhook(sign(body), body)
     assert (parsed.status, parsed.payment_id, parsed.account_id) == ("refunded", "pi_test_1", ACCOUNT)
     assert (parsed.amount_minor, parsed.currency, parsed.order_reference) == (1200, "GBP", "")
+    assert parsed.event_id == "evt_test_2"
 
 
 @pytest.mark.parametrize(

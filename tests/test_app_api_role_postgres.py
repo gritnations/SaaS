@@ -39,6 +39,7 @@ EXPECTED = {
     "services": {"SELECT", "INSERT", "UPDATE"},
     "business_members": {"SELECT", "INSERT"},
     "email_log": {"INSERT"},
+    "payment_events": {"INSERT"},
     "time_off": {"SELECT", "INSERT", "DELETE"},
     "weekly_hours": {"SELECT", "INSERT", "DELETE"},
 }
