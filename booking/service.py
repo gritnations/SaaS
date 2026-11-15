@@ -22,6 +22,7 @@ exclusion constraint refuses an overlapping row even when two requests race.
 """
 
 import hashlib
+import json
 import logging
 import secrets
 from collections.abc import Callable, Sequence
@@ -39,6 +40,7 @@ from booking.availability import (
     booking_window,
     day_slots,
     normalize_break,
+    session_label,
     time_to_minutes,
     weekday_index,
 )
@@ -47,6 +49,9 @@ from payments.base import AccountPayments, CheckoutOrder, ProviderUnavailableErr
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
+
+IDEMPOTENCY_INDEX = "bookings_idempotency_per_business"
+"""The unique index that makes an idempotency key one booking within a business."""
 
 MAX_DAYS_PER_REQUEST = 14
 """The most days one availability request may cover."""
@@ -95,6 +100,10 @@ class InvalidSlotError(BookingError):
 
 class SlotTakenError(BookingError):
     """The session was free when checked but another booking took it first."""
+
+
+class IdempotencyKeyReuseError(BookingError):
+    """The idempotency key was already used for a different booking request."""
 
 
 @dataclass(frozen=True)
@@ -205,6 +214,8 @@ class BookingRequest:
         note: Customer's note or question, if given.
         pay: ``online`` or ``venue`` for a paid service, or ``None`` to let the business's options decide,
             preferring online.
+        idempotency_key: A random key the customer's page sends with one booking attempt. A repeat of the same
+            request with the same key returns the booking already made. ``None`` means no repeat protection.
     """
 
     service: str
@@ -215,6 +226,7 @@ class BookingRequest:
     phone: str | None
     note: str | None
     pay: str | None = None
+    idempotency_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -230,6 +242,8 @@ class Confirmation:
         status: ``confirmed``, or ``pending_payment`` while a paid booking waits for its payment.
         checkout_url: Where to pay, for a booking paid online.
         payment_status: ``not_required``, ``awaiting`` (paying online) or ``at_venue``.
+        replayed: ``True`` when this is a booking made by an earlier request with the same idempotency key. It
+            carries no manage code and no checkout link, which are not stored.
     """
 
     reference: str
@@ -239,6 +253,7 @@ class Confirmation:
     status: str = "confirmed"
     checkout_url: str | None = None
     payment_status: str = "not_required"
+    replayed: bool = False
 
 
 class BookingNotifier(Protocol):
@@ -296,6 +311,28 @@ class BookingBackend(Protocol):
             The confirmed booking.
         """
         ...
+
+
+def request_fingerprint(request: BookingRequest) -> bytes:
+    """Hash what a booking request asks for, apart from its idempotency key.
+
+    Args:
+        request: The request.
+
+    Returns:
+        A SHA-256 digest that is the same for the same request, so a key reused for another request is noticed.
+    """
+    parts = [
+        request.service,
+        request.date.isoformat(),
+        request.time,
+        request.name,
+        request.email,
+        request.phone,
+        request.note,
+        request.pay,
+    ]
+    return hashlib.sha256(json.dumps(parts, ensure_ascii=True, separators=(",", ":")).encode("ascii")).digest()
 
 
 def hash_token(token: str) -> bytes:
@@ -601,6 +638,63 @@ class BookingService:
             service = self._service(connection, business, service_slug)
             return business, service, self._days(connection, business, service, dates)
 
+    @staticmethod
+    def _replay(
+        connection: psycopg.Connection[Any], business: Business, key: str, fingerprint: bytes
+    ) -> Confirmation | None:
+        """Find the booking an earlier request with this idempotency key made.
+
+        Args:
+            connection: An open connection.
+            business: The business.
+            key: The idempotency key.
+            fingerprint: The hash of the present request.
+
+        Returns:
+            The booking as it is now, without a manage code or checkout link, or ``None`` when the key is new.
+
+        Raises:
+            IdempotencyKeyReuseError: If the key was used for a different request.
+        """
+        row = connection.execute(
+            "SELECT b.reference, b.status, b.payment_status, b.starts_at, b.request_hash, "
+            "s.id::text, s.slug, s.name, s.duration_minutes, s.price_minor "
+            "FROM bookings b JOIN services s ON s.id = b.service_id "
+            "WHERE b.business_id = %s AND b.idempotency_key = %s",
+            (business.id, key),
+        ).fetchone()
+        if row is None:
+            return None
+        if bytes(row[4]) != fingerprint:
+            raise IdempotencyKeyReuseError("That key was already used for a different booking.")
+        service = Service(*row[5:10])
+        start = row[3].astimezone(business.zone)
+        slot = Slot(
+            time=start.strftime("%H:%M"),
+            label=session_label(start.hour * 60 + start.minute, service.duration_minutes),
+            starts_at=start,
+            ends_at=start + timedelta(minutes=service.duration_minutes),
+            available=False,
+        )
+        return Confirmation(row[0], service, slot, None, row[1], None, row[2], replayed=True)
+
+    def _find_replay(self, business_slug: str, key: str, fingerprint: bytes) -> Confirmation | None:
+        """Look for an earlier booking under the key, in a fresh transaction, after a clash on insert.
+
+        Args:
+            business_slug: The business's public identifier.
+            key: The idempotency key.
+            fingerprint: The hash of the present request.
+
+        Returns:
+            The earlier booking, or ``None``.
+
+        Raises:
+            IdempotencyKeyReuseError: If the key was used for a different request.
+        """
+        with self._database.connection() as connection:
+            return self._replay(connection, self._business(connection, business_slug), key, fingerprint)
+
     def create_booking(self, business_slug: str, request: BookingRequest) -> Confirmation:
         """Book a session. A free service is confirmed at once; a paid one is held until it is paid.
 
@@ -622,13 +716,20 @@ class BookingService:
                 payment now.
             InvalidSlotError: If the date and time are not an available session.
             SlotTakenError: If another booking took the session first.
+            IdempotencyKeyReuseError: If the idempotency key was used for a different request.
             postgres.DatabaseUnavailableError: If the database cannot be reached.
         """
         if time_to_minutes(request.time) is None:
             raise InvalidSlotError("That time is not available.")
+        key = request.idempotency_key
+        fingerprint = request_fingerprint(request) if key else None
         try:
             with self._database.connection() as connection:
                 business = self._business(connection, business_slug)
+                if key and fingerprint:
+                    earlier = self._replay(connection, business, key, fingerprint)
+                    if earlier is not None:
+                        return earlier
                 service = self._service(connection, business, request.service)
                 method = self._payment_method(business, service, request.pay)
                 paid = method == "online"
@@ -646,9 +747,9 @@ class BookingService:
                 row = connection.execute(
                     "INSERT INTO bookings (business_id, service_id, reference, status, starts_at, ends_at, "
                     "blocked_until, price_minor, customer_name, customer_email, customer_phone, customer_note, "
-                    "manage_token_hash, payment_status, hold_expires_at) "
+                    "manage_token_hash, payment_status, hold_expires_at, idempotency_key, request_hash) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                    "CASE WHEN %s THEN now() + make_interval(mins => %s) END) "
+                    "CASE WHEN %s THEN now() + make_interval(mins => %s) END, %s, %s) "
                     "RETURNING id::text, hold_expires_at",
                     (
                         business.id,
@@ -667,9 +768,18 @@ class BookingService:
                         {"online": "awaiting", "venue": "at_venue"}.get(method, "not_required"),
                         paid,
                         HOLD_MINUTES,
+                        key,
+                        fingerprint,
                     ),
                 ).fetchone()
-        except (errors.ExclusionViolation, errors.DeadlockDetected):
+        except (errors.ExclusionViolation, errors.DeadlockDetected, errors.UniqueViolation) as clash:
+            if isinstance(clash, errors.UniqueViolation) and clash.diag.constraint_name != IDEMPOTENCY_INDEX:
+                raise
+            # A request with the same key may have committed first: if so, this one is its repeat.
+            if key and fingerprint:
+                earlier = self._find_replay(business_slug, key, fingerprint)
+                if earlier is not None:
+                    return earlier
             # A deadlock here is two overlapping requests waiting on each other's overlap check: PostgreSQL
             # stops one of them, and for that one the time is just as taken as if it had lost the check.
             raise SlotTakenError("That time has just been booked.") from None

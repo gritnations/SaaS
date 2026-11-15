@@ -22,6 +22,7 @@ from booking.service import (
     Business,
     Confirmation,
     DayAvailability,
+    IdempotencyKeyReuseError,
     InvalidSlotError,
     NotFoundError,
     PaymentUnavailableError,
@@ -260,6 +261,7 @@ def test_validation_errors_do_not_echo_submitted_values() -> None:
         (PaymentUnavailableError("Online payment is not available yet."), 402),
         (InvalidSlotError("That time is not available."), 409),
         (SlotTakenError("That time has just been booked."), 409),
+        (IdempotencyKeyReuseError("That key was already used for a different booking."), 422),
         (DatabaseUnavailableError("The database is unavailable."), 503),
     ],
 )
@@ -301,3 +303,50 @@ def test_the_allowed_origin_can_call_booking_from_a_browser() -> None:
     other = client.get("/businesses/example/services", headers={"Origin": "https://other.example"})
     assert allowed.headers.get("access-control-allow-origin") == ORIGIN
     assert "access-control-allow-origin" not in other.headers
+
+
+def test_the_idempotency_key_reaches_the_service_and_a_new_booking_answers_201() -> None:
+    """The header is passed on as the request's key; without it the key is ``None``."""
+    bookings = FakeBookings()
+    keyed = client_for(bookings).post(
+        "/businesses/example/bookings", json=VALID, headers={"Idempotency-Key": "key-abcdefgh-1"}
+    )
+    plain = client_for(bookings).post("/businesses/example/bookings", json=VALID)
+    assert (keyed.status_code, plain.status_code) == (201, 201)
+    assert [r.idempotency_key for r in bookings.received] == ["key-abcdefgh-1", None]
+
+
+class ReplayingBookings(FakeBookings):
+    """A booking service that answers every request as a repeat of an earlier one."""
+
+    def create_booking(self, business_slug: str, request: BookingRequest) -> Confirmation:
+        """Record the request and answer it as a repeat.
+
+        Args:
+            business_slug: Ignored.
+            request: The request, recorded in :attr:`received`.
+
+        Returns:
+            A confirmation marked as replayed, without a manage code.
+        """
+        self.received.append(request)
+        return Confirmation("ABCDEFGH23", INTRO, SLOT, replayed=True)
+
+
+def test_a_repeat_answers_200_with_the_same_booking_and_no_code() -> None:
+    """A replayed booking is 200, not 201, and carries neither a manage code nor a checkout link."""
+    response = client_for(ReplayingBookings()).post(
+        "/businesses/example/bookings", json=VALID, headers={"Idempotency-Key": "key-abcdefgh-1"}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reference"] == "ABCDEFGH23" and body["manage_token"] is None and body["checkout_url"] is None
+
+
+@pytest.mark.parametrize("key", ["short", "has spaces in it", "x" * 129, "bad/chars-here"])
+def test_a_malformed_idempotency_key_is_refused_before_the_service(key: str) -> None:
+    """The header must be 8 to 128 letters, digits, hyphens or underscores."""
+    bookings = FakeBookings()
+    response = client_for(bookings).post("/businesses/example/bookings", json=VALID, headers={"Idempotency-Key": key})
+    assert response.status_code == 422
+    assert bookings.received == []

@@ -458,8 +458,15 @@ async function book() {
   if (f.phone.trim()) body.phone = f.phone.trim();
   if (f.note.trim()) body.note = f.note.trim();
   if (isPaid() && payOptions().length > 1) body.pay = state.pay;
-  const answer = await api(`/businesses/${state.slug}/bookings`, { method: "POST", body });
+  // One key per attempt: kept if the answer is lost, so a retry returns the booking already made.
+  if (!state.attemptKey) state.attemptKey = globalThis.crypto.randomUUID();
+  const answer = await api(`/businesses/${state.slug}/bookings`, {
+    method: "POST",
+    body,
+    headers: { "Idempotency-Key": state.attemptKey },
+  });
   state.busy = false;
+  if (answer.status !== 0 && answer.status < 500) state.attemptKey = null;
   if (answer.ok && answer.data.checkout_url) {
     location.assign(answer.data.checkout_url);
     return;
