@@ -740,6 +740,11 @@ class BookingService:
                     None,
                 )
                 if slot is None:
+                    if key and fingerprint:
+                        # The same request may have committed since the check above: then this is its repeat.
+                        earlier = self._replay(connection, business, key, fingerprint)
+                        if earlier is not None:
+                            return earlier
                     raise InvalidSlotError("That time is not available.")
                 blocked_until = slot.ends_at + timedelta(minutes=normalize_break(business.break_minutes))
                 reference = new_reference()
