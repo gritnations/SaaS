@@ -4,12 +4,12 @@
  * Call the platform API on the same site.
  * Every non-GET request sends a JSON body, because the host refuses a body-less POST.
  * @param {string} path The API path, starting with "/".
- * @param {{method?: string, body?: object}} [options] The method and JSON body.
+ * @param {{method?: string, body?: object, headers?: Record<string, string>}} [options] The method, JSON body and extra headers.
  * @returns {Promise<{ok: boolean, status: number, data: any}>} The outcome. status 0 means no answer.
  */
 export async function api(path, options = {}) {
   const method = options.method || "GET";
-  const init = { method, headers: {} };
+  const init = { method, headers: { ...(options.headers || {}) } };
   if (method !== "GET") {
     init.headers["Content-Type"] = "application/json";
     init.body = JSON.stringify(options.body || {});

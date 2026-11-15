@@ -15,7 +15,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
 from booking.availability import Slot
@@ -23,6 +23,7 @@ from booking.service import (
     MAX_DAYS_PER_REQUEST,
     BookingBackend,
     BookingRequest,
+    IdempotencyKeyReuseError,
     InvalidSlotError,
     NotFoundError,
     PaymentUnavailableError,
@@ -36,6 +37,9 @@ PHONE_PATTERN = re.compile(r"^[0-9+()\- ]{5,32}$")
 
 Slug = Annotated[str, Path(pattern=SLUG_PATTERN)]
 """A business slug as it appears in a request path."""
+
+IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", pattern=r"^[A-Za-z0-9_-]{8,128}$")]
+"""The optional key a page sends with one booking attempt, so a repeat returns the booking already made."""
 
 
 class BusinessOut(BaseModel):
@@ -359,20 +363,27 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
         )
 
     @router.post("/bookings", response_model=BookingOut, status_code=201)
-    def create_booking(business: Slug, body: BookingBody) -> BookingOut:
+    def create_booking(
+        business: Slug, body: BookingBody, response: Response, idempotency_key: IdempotencyKey = None
+    ) -> BookingOut:
         """Book a session: confirmed for a free service, held with a checkout link for a paid one.
+
+        With an ``Idempotency-Key`` header, a repeat of the same request returns the booking already made, with
+        status 200 and no manage code or checkout link, which are not stored.
 
         Args:
             business: The business slug.
             body: The customer's request.
+            response: The response, whose status is 200 for a repeat.
+            idempotency_key: The optional key for this booking attempt.
 
         Returns:
             The booking.
 
         Raises:
             HTTPException: 404 for an unknown business or service, 402 for a paid service the business
-                cannot take payment for now, 409 when the time is not available or was just taken, 503
-                when the database is unreachable.
+                cannot take payment for now, 409 when the time is not available or was just taken, 422 when
+                the key was already used for a different request, 503 when the database is unreachable.
         """
         request = BookingRequest(
             service=body.service,
@@ -383,6 +394,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             phone=body.phone,
             note=body.note,
             pay=body.pay,
+            idempotency_key=idempotency_key,
         )
         try:
             confirmed = require().create_booking(business, request)
@@ -392,8 +404,12 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
             raise HTTPException(status_code=402, detail=str(exc)) from None
         except (InvalidSlotError, SlotTakenError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
+        except IdempotencyKeyReuseError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
         except DatabaseUnavailableError:
             raise HTTPException(status_code=503, detail="Booking is unavailable.") from None
+        if confirmed.replayed:
+            response.status_code = 200
         offered = confirmed.service
         return BookingOut(
             reference=confirmed.reference,
