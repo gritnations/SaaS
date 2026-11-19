@@ -18,7 +18,6 @@ State transitions of a business's plan:
 """
 
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -27,7 +26,7 @@ import psycopg
 
 from booking.owner import PLAN_CURRENCY, PLAN_PRICES, InvalidChangeError
 from booking.service import NotFoundError
-from payments.base import CancellationQuote, PaymentEvent, SubscriptionBilling, SubscriptionOrder
+from payments.base import CancellationQuote, SubscriptionBilling, SubscriptionEvent, SubscriptionOrder
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -116,7 +115,7 @@ class BillingBackend(Protocol):
         """
         ...
 
-    def record(self, event: PaymentEvent) -> bool:
+    def record(self, event: SubscriptionEvent) -> bool:
         """See :meth:`BillingService.record`.
 
         Args:
@@ -298,7 +297,7 @@ class BillingService:
         LOGGER.info("plan cancelled with refund business=%s refund=%s", slug, refunded.refund_minor)
         return refunded
 
-    def record(self, event: PaymentEvent) -> bool:
+    def record(self, event: SubscriptionEvent) -> bool:
         """Apply a verified subscription event to its business.
 
         Args:
@@ -310,15 +309,7 @@ class BillingService:
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
         """
-        if event.status not in ("subscription_active", "subscription_past_due", "subscription_ended"):
-            return False
-        try:
-            business_id = str(uuid.UUID(event.order_reference))
-        except ValueError:
-            LOGGER.warning("subscription event without a business provider=%s", event.provider)
-            return False
-        if not event.subscription_id:
-            return False
+        business_id = str(event.business_id)
         with self._database.connection() as connection:
             row = connection.execute(
                 "SELECT slug, plan, plan_status, billing_subscription_id, plan_ends_at FROM businesses "

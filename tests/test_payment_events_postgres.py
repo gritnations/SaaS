@@ -14,7 +14,6 @@ owner-only except for the API role's insert. They do not establish how the provi
 
 import logging
 import os
-from dataclasses import replace
 from typing import cast
 
 import psycopg
@@ -25,7 +24,7 @@ from test_manage_postgres import URL_ENV
 from test_migrations import FILES, number
 from test_payment_conflict_postgres import Setup, setup  # noqa: F401
 
-from payments.base import PaymentEvent
+from payments.base import BookingPaymentEvent
 
 pytestmark = pytest.mark.skipif(not os.environ.get(URL_ENV), reason=f"{URL_ENV} is not set")
 
@@ -81,7 +80,7 @@ def put_back(setup: Setup) -> None:
 
 def test_a_repeat_of_the_same_event_is_ignored_by_its_identifier(events: Setup) -> None:
     """The first delivery confirms and is recorded; the same identifier again changes nothing, a new one does."""
-    paid = replace(events.event("pi_events_1"), event_id="evt_1")
+    paid = events.event("pi_events_1").model_copy(update={"event_id": "evt_1"})
     assert events.service.record(paid) is True
     assert events.state() == ("confirmed", "paid", "pi_events_1")
     assert stored(events, "evt_1") == 1
@@ -89,21 +88,23 @@ def test_a_repeat_of_the_same_event_is_ignored_by_its_identifier(events: Setup) 
     assert events.service.record(paid) is False
     assert events.state() == ("pending_payment", "awaiting", None)
     assert stored(events, "evt_1") == 1
-    assert events.service.record(replace(paid, event_id="evt_2")) is True
+    assert events.service.record(paid.model_copy(update={"event_id": "evt_2"})) is True
     assert events.state() == ("confirmed", "paid", "pi_events_1")
 
 
 def test_an_event_that_changed_nothing_leaves_no_record(events: Setup, caplog: pytest.LogCaptureFixture) -> None:
     """A payment held by another booking, a wrong amount and an unknown checkout are not recorded."""
     with caplog.at_level(logging.ERROR, logger="booking.payments"):
-        conflict = replace(events.event("pi_conflict"), event_id="evt_conflict")
+        conflict = events.event("pi_conflict").model_copy(update={"event_id": "evt_conflict"})
         assert events.service.record(conflict) is False
     assert stored(events, "evt_conflict") == 0
-    wrong = replace(events.event("pi_events_2"), event_id="evt_wrong", amount_minor=100)
+    wrong = events.event("pi_events_2").model_copy(update={"event_id": "evt_wrong", "amount_minor": 100})
     assert events.service.record(wrong) is False
     assert stored(events, "evt_wrong") == 0
-    unknown = replace(events.event("pi_events_3"), event_id="evt_unknown", checkout_id="cs_test_nobody")
-    assert events.service.record(replace(unknown, order_reference="NOBODY")) is False
+    unknown = events.event("pi_events_3").model_copy(
+        update={"event_id": "evt_unknown", "checkout_id": "cs_test_nobody"}
+    )
+    assert events.service.record(unknown.model_copy(update={"order_reference": "NOBODY"})) is False
     assert stored(events, "evt_unknown") == 0
     assert events.state() == ("pending_payment", "awaiting", None)
 
@@ -118,15 +119,15 @@ def test_an_event_without_an_identifier_is_still_applied(events: Setup) -> None:
 
 def test_an_expired_checkout_and_a_refund_are_recorded_once(events: Setup) -> None:
     """The expiry and the refund paths also record the event and ignore a repeat of the same identifier."""
-    expired = replace(events.event("pi_events_5"), status="expired", event_id="evt_expired")
+    expired = events.event("pi_events_5").model_copy(update={"status": "expired", "event_id": "evt_expired"})
     assert events.service.record(expired) is True
     assert events.state()[0] == "expired"
     assert stored(events, "evt_expired") == 1
     put_back(events)
     assert events.service.record(expired) is False
     assert events.state()[0] == "pending_payment"
-    refund = PaymentEvent(
-        provider="stripe", order_reference="", status="refunded", live=False, account_id=events.account,
+    refund = BookingPaymentEvent(
+        provider="stripe", status="refunded", live=False, account_id=events.account,
         amount_minor=2500, currency="GBP", payment_id="pi_conflict", event_id="evt_refund",
     )  # fmt: skip
     assert events.service.record(refund) is True

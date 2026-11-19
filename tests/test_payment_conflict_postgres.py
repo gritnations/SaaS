@@ -26,7 +26,7 @@ from test_manage_postgres import URL_ENV
 from test_migrations import FILES, number
 
 from booking.payments import PaymentService
-from payments.base import AccountPayments, PaymentEvent
+from payments.base import AccountPayments, BookingPaymentEvent
 from postgres import Database
 
 pytestmark = pytest.mark.skipif(not os.environ.get(URL_ENV), reason=f"{URL_ENV} is not set")
@@ -80,7 +80,7 @@ class Setup:
         self.account = account
         self.waiting = waiting
 
-    def event(self, payment_id: str) -> PaymentEvent:
+    def event(self, payment_id: str) -> BookingPaymentEvent:
         """Build the verified paid event for the waiting booking.
 
         Args:
@@ -89,7 +89,7 @@ class Setup:
         Returns:
             The event.
         """
-        return PaymentEvent(
+        return BookingPaymentEvent(
             provider="stripe",
             order_reference=self.waiting,
             status="paid",

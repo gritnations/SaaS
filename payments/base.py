@@ -14,13 +14,26 @@ amount always comes from the server.
 """
 
 import re
+import uuid
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Annotated, Literal, Protocol, runtime_checkable
 
-ORDER_REFERENCE_PATTERN = r"^[A-Za-z0-9_-]{6,64}$"
-"""The accepted shape of an order reference: 6 to 64 letters, digits, hyphens or underscores."""
+from pydantic import BaseModel, Field, StringConstraints
+
+from contracts import ORDER_REFERENCE_PATTERN as ORDER_REFERENCE_PATTERN  # re-exported for the API
+from contracts import (
+    STRICT,
+    AwareDatetime,
+    Currency,
+    OrderReference,
+    PaidAmountMinor,
+    ProviderId,
+    ProviderName,
+    ReportedAmountMinor,
+    ReturnUrl,
+    SecureUrl,
+)
 
 _ORDER_REFERENCE_RE = re.compile(ORDER_REFERENCE_PATTERN)
 
@@ -57,8 +70,7 @@ def is_valid_order_reference(value: str) -> bool:
     return bool(_ORDER_REFERENCE_RE.fullmatch(value))
 
 
-@dataclass(frozen=True)
-class CheckoutSession:
+class CheckoutSession(BaseModel):
     """The result of starting a checkout.
 
     Attributes:
@@ -68,57 +80,101 @@ class CheckoutSession:
         live: ``True`` only when real money can move. A stub always reports ``False``.
     """
 
-    provider: str
-    order_reference: str
-    checkout_url: str | None
+    model_config = STRICT
+
+    provider: ProviderName
+    order_reference: OrderReference
+    checkout_url: SecureUrl | None
     live: bool
 
 
-@dataclass(frozen=True)
-class PaymentEvent:
-    """A payment notification after the provider has parsed it.
+class BookingPaymentEvent(BaseModel):
+    """A verified notification about a customer's payment for a booking.
+
+    Only the provider, the outcome and whether it is live are always present. The other fields are checked
+    against the booking in the database before anything changes, and an event that lacks what its outcome
+    needs is left alone there.
 
     Attributes:
-        provider: The name of the provider that sent the notification.
-        order_reference: The order the notification is about.
-        status: The reported outcome: ``"paid"``, ``"failed"``, ``"expired"``, ``"refunded"`` (a payment
-            was refunded in full), or ``"ignored"`` for a verified notification that needs no action. For a business's own subscription to a plan:
-            ``"subscription_active"``, ``"subscription_past_due"`` or ``"subscription_ended"``.
+        provider: The provider that sent the notification.
+        status: The outcome: ``"paid"``, ``"failed"``, ``"expired"``, or ``"refunded"`` (a payment was refunded
+            in full).
         live: ``True`` only when the event describes real money.
+        order_reference: The booking the notification names, when it names one.
         checkout_id: The provider's checkout identifier, when the notification is about a checkout.
         account_id: The business's payment account the notification came from, if any.
         amount_minor: The amount paid, in minor units, as the provider reports it.
         currency: The currency paid, as an upper-case ISO 4217 code.
         payment_id: The provider's payment identifier, when known.
-        subscription_id: The provider's subscription identifier, for a subscription event.
-        customer_id: The provider's customer identifier, for a subscription event.
-        plan: The plan the subscription is for, as recorded when it was started.
+        event_id: The provider's own identifier for this notification, used to recognise a repeat. ``None``
+            when the provider sends none.
+    """
+
+    model_config = STRICT
+
+    provider: ProviderName
+    status: Literal["paid", "failed", "expired", "refunded"]
+    live: bool
+    order_reference: OrderReference | None = None
+    checkout_id: ProviderId | None = None
+    account_id: ProviderId | None = None
+    amount_minor: ReportedAmountMinor | None = None
+    currency: Currency | None = None
+    payment_id: ProviderId | None = None
+    event_id: ProviderId | None = None
+
+
+class SubscriptionEvent(BaseModel):
+    """A verified notification about a business's own subscription to a plan, billed to the platform.
+
+    Attributes:
+        provider: The provider that sent the notification.
+        status: The outcome: ``"subscription_active"``, ``"subscription_past_due"`` or ``"subscription_ended"``.
+        live: ``True`` only when the event describes real money.
+        business_id: The business the subscription belongs to, as recorded when it was started.
+        subscription_id: The provider's subscription identifier.
+        customer_id: The provider's customer identifier, when known.
+        plan: The plan the subscription is for, as recorded when it was started. Checked against the paid
+            plans when the subscription becomes active.
         ends_at: When a cancelled subscription will end, or ``None`` when it is not set to end. Only events
             about the subscription itself carry it; ``ends_known`` says whether this one does.
         ends_known: Whether the event reports the subscription's end date (``ends_at`` may still be ``None``).
-        event_id: The provider's own identifier for this notification, used to recognise a repeat. ``None`` when the
-            provider sends none, or the event is not about a booking.
     """
 
-    provider: str
-    order_reference: str
-    status: str
+    model_config = STRICT
+
+    provider: ProviderName
+    status: Literal["subscription_active", "subscription_past_due", "subscription_ended"]
     live: bool
-    checkout_id: str | None = None
-    account_id: str | None = None
-    amount_minor: int | None = None
-    currency: str | None = None
-    payment_id: str | None = None
-    subscription_id: str | None = None
-    customer_id: str | None = None
+    business_id: uuid.UUID
+    subscription_id: ProviderId
+    customer_id: ProviderId | None = None
     plan: str | None = None
-    ends_at: datetime | None = None
+    ends_at: AwareDatetime | None = None
     ends_known: bool = False
-    event_id: str | None = None
 
 
-@dataclass(frozen=True)
-class SubscriptionOrder:
+class IgnoredEvent(BaseModel):
+    """A verified notification that needs no action, or one too incomplete to act on.
+
+    Attributes:
+        provider: The provider that sent the notification.
+        live: ``True`` only when the event describes real money.
+        status: Always ``"ignored"``, so that every event reports an outcome in the same way.
+    """
+
+    model_config = STRICT
+
+    provider: ProviderName
+    live: bool
+    status: Literal["ignored"] = "ignored"
+
+
+PaymentEvent = BookingPaymentEvent | SubscriptionEvent | IgnoredEvent
+"""What a provider adapter returns for a verified notification. The record's type says who handles it."""
+
+
+class SubscriptionOrder(BaseModel):
     """A business's subscription to a paid plan, billed to the platform. Every value is decided on the server.
 
     Attributes:
@@ -133,19 +189,20 @@ class SubscriptionOrder:
         cancel_url: Where the owner returns after giving up.
     """
 
+    model_config = STRICT
+
     business_id: str
-    plan: str
+    plan: Annotated[str, StringConstraints(pattern=r"^(starter|pro)$")]
     plan_name: str
-    amount_minor: int
-    currency: str
+    amount_minor: PaidAmountMinor
+    currency: Currency
     customer_email: str | None
-    customer_id: str | None
-    success_url: str
-    cancel_url: str
+    customer_id: ProviderId | None
+    success_url: ReturnUrl
+    cancel_url: ReturnUrl
 
 
-@dataclass(frozen=True)
-class CancellationQuote:
+class CancellationQuote(BaseModel):
     """What cancelling a business's plan now refunds. Worked out on the server; a browser never sends it.
 
     Attributes:
@@ -154,9 +211,11 @@ class CancellationQuote:
         unused_days: Whole days of the paid period that are not used, for showing to the owner.
     """
 
-    refund_minor: int
-    currency: str
-    unused_days: int
+    model_config = STRICT
+
+    refund_minor: ReportedAmountMinor
+    currency: Currency
+    unused_days: Annotated[int, Field(ge=0)]
 
 
 @runtime_checkable
@@ -236,8 +295,7 @@ class SubscriptionBilling(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class CheckoutOrder:
+class CheckoutOrder(BaseModel):
     """A checkout the booking layer asks a provider to host. Every value is decided on the server.
 
     Attributes:
@@ -252,19 +310,20 @@ class CheckoutOrder:
         expires_at: When the checkout stops accepting payment.
     """
 
-    reference: str
-    amount_minor: int
-    currency: str
-    description: str
-    account_id: str
+    model_config = STRICT
+
+    reference: OrderReference
+    amount_minor: PaidAmountMinor
+    currency: Currency
+    description: Annotated[str, StringConstraints(min_length=1)]
+    account_id: ProviderId
     customer_email: str
-    success_url: str
-    cancel_url: str
-    expires_at: datetime
+    success_url: ReturnUrl
+    cancel_url: ReturnUrl
+    expires_at: AwareDatetime
 
 
-@dataclass(frozen=True)
-class HostedCheckout:
+class HostedCheckout(BaseModel):
     """A checkout page created by the provider.
 
     Attributes:
@@ -272,8 +331,10 @@ class HostedCheckout:
         checkout_url: Where to send the payer.
     """
 
-    checkout_id: str
-    checkout_url: str
+    model_config = STRICT
+
+    checkout_id: ProviderId
+    checkout_url: SecureUrl
 
 
 @runtime_checkable

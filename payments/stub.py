@@ -12,8 +12,8 @@ import json
 from collections.abc import Mapping
 
 from payments.base import (
+    BookingPaymentEvent,
     CheckoutSession,
-    PaymentEvent,
     WebhookRejectedError,
     is_valid_order_reference,
 )
@@ -42,13 +42,13 @@ class StubProvider:
             A session with no checkout URL and ``live`` set to ``False``.
         """
         return CheckoutSession(
-            provider=self.name,
+            provider="stub",
             order_reference=order_reference,
             checkout_url=None,
             live=False,
         )
 
-    def parse_webhook(self, headers: Mapping[str, str], body: bytes) -> PaymentEvent:
+    def parse_webhook(self, headers: Mapping[str, str], body: bytes) -> BookingPaymentEvent:
         """Parse a stub notification.
 
         The body must be a JSON object with exactly an ``order_reference`` and a ``status`` of ``"paid"``
@@ -81,9 +81,9 @@ class StubProvider:
             raise WebhookRejectedError("invalid order reference")
         if not isinstance(status, str) or status not in _STATUSES:
             raise WebhookRejectedError("invalid status")
-        return PaymentEvent(
-            provider=self.name,
+        return BookingPaymentEvent(
+            provider="stub",
             order_reference=reference,
-            status=str(status),
+            status="paid" if status == "paid" else "failed",
             live=False,
         )

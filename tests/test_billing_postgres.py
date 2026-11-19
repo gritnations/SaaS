@@ -15,8 +15,9 @@ import os
 import secrets
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 import pytest
 from test_payments_postgres import FakeProvider
@@ -34,8 +35,8 @@ from booking.service import (
 from payments.base import (
     CancellationQuote,
     HostedCheckout,
-    PaymentEvent,
     ProviderUnavailableError,
+    SubscriptionEvent,
     SubscriptionOrder,
 )
 from postgres import Database, DatabaseSettings
@@ -62,7 +63,7 @@ class FakeBillingProvider:
     name: str = "stripe"
     live: bool = False
     orders: list[SubscriptionOrder] = field(default_factory=list)
-    quote: CancellationQuote = CancellationQuote(450, "GBP", 15)
+    quote: CancellationQuote = CancellationQuote(refund_minor=450, currency="GBP", unused_days=15)
     cancelled: list[str] = field(default_factory=list)
     fail: Exception | None = None
 
@@ -76,7 +77,9 @@ class FakeBillingProvider:
             A checkout.
         """
         self.orders.append(order)
-        return HostedCheckout("cs_test_plan", f"https://checkout.example.com/{order.business_id}")
+        return HostedCheckout(
+            checkout_id="cs_test_plan", checkout_url=f"https://checkout.example.com/{order.business_id}"
+        )
 
     def billing_portal_url(self, customer_id: str, return_url: str) -> str:
         """Give a portal link.
@@ -251,7 +254,12 @@ def set_business(world: World, slug: str, assignments: str) -> None:
         connection.execute(f"UPDATE businesses SET {assignments} WHERE slug = %s", (slug,))
 
 
-def event(business_id: str, status: str, subscription: str = "sub_test_1", plan: str = "starter") -> PaymentEvent:
+def event(
+    business_id: str,
+    status: Literal["subscription_active", "subscription_past_due", "subscription_ended"],
+    subscription: str = "sub_test_1",
+    plan: str = "starter",
+) -> SubscriptionEvent:
     """Build a verified subscription event.
 
     Args:
@@ -263,9 +271,9 @@ def event(business_id: str, status: str, subscription: str = "sub_test_1", plan:
     Returns:
         The event.
     """
-    return PaymentEvent(
+    return SubscriptionEvent(
         provider="stripe",
-        order_reference=business_id,
+        business_id=uuid.UUID(business_id),
         status=status,
         live=False,
         subscription_id=subscription,
@@ -397,7 +405,6 @@ def test_events_that_do_not_match_change_nothing(world: World) -> None:
     assert world.billing.record(event(business_id, "subscription_ended", subscription="sub_other")) is False
     assert world.billing.record(event(business_id, "subscription_active", subscription="sub_other")) is False
     assert world.billing.record(event(str(uuid.uuid4()), "subscription_active")) is False
-    assert world.billing.record(event("not-a-business", "subscription_active")) is False
     _, other_slug, other_id = sign_up(world)
     assert world.billing.record(event(other_id, "subscription_active", plan="enterprise")) is False
     assert plan_of(world, slug)[:2] == ("starter", "active")
@@ -471,14 +478,14 @@ def test_a_cancelled_plan_keeps_its_plan_and_reports_when_it_ends(world: World) 
     account, slug, business_id = sign_up(world)
     world.billing.record(event(business_id, "subscription_active"))
     ends = datetime(2026, 11, 20, tzinfo=UTC)
-    cancelling = replace(event(business_id, "subscription_active"), ends_at=ends, ends_known=True)
+    cancelling = event(business_id, "subscription_active").model_copy(update={"ends_at": ends, "ends_known": True})
     assert world.billing.record(cancelling) is True
     [membership] = world.owners.memberships(account)
     assert (membership.plan, membership.plan_status, membership.plan_ends_at) == ("starter", "active", ends)
     assert world.billing.record(cancelling) is False
     assert world.billing.record(event(business_id, "subscription_active")) is False
     assert world.owners.memberships(account)[0].plan_ends_at == ends
-    undone = replace(event(business_id, "subscription_active"), ends_at=None, ends_known=True)
+    undone = event(business_id, "subscription_active").model_copy(update={"ends_at": None, "ends_known": True})
     assert world.billing.record(undone) is True
     assert world.owners.memberships(account)[0].plan_ends_at is None
     world.billing.record(cancelling)

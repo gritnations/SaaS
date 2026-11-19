@@ -15,7 +15,7 @@ import secrets
 import threading
 import uuid
 from collections.abc import Iterator
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
@@ -31,7 +31,7 @@ from booking.service import (
     PaymentUnavailableError,
     SlotTakenError,
 )
-from payments.base import CheckoutOrder, HostedCheckout, PaymentEvent, ProviderUnavailableError
+from payments.base import BookingPaymentEvent, CheckoutOrder, HostedCheckout, ProviderUnavailableError
 from postgres import Database, DatabaseSettings
 
 URL_ENV = "BOOKING_TEST_DATABASE_URL"
@@ -114,7 +114,9 @@ class FakeProvider:
         if self.fail_checkout:
             raise ProviderUnavailableError("Stripe could not create checkout.")
         self.orders.append(order)
-        return HostedCheckout(f"cs_test_{order.reference}", f"https://checkout.example.com/{order.reference}")
+        return HostedCheckout(
+            checkout_id=f"cs_test_{order.reference}", checkout_url=f"https://checkout.example.com/{order.reference}"
+        )
 
 
 @dataclass
@@ -267,7 +269,7 @@ def account(world: World) -> str:
     return str(found[0])
 
 
-def paid(world: World, reference: str, **change: object) -> PaymentEvent:
+def paid(world: World, reference: str, **change: object) -> BookingPaymentEvent:
     """Build the verified paid event for a booking.
 
     Args:
@@ -278,7 +280,7 @@ def paid(world: World, reference: str, **change: object) -> PaymentEvent:
     Returns:
         The event.
     """
-    base = PaymentEvent(
+    base = BookingPaymentEvent(
         provider="stripe",
         order_reference=reference,
         status="paid",
@@ -289,7 +291,7 @@ def paid(world: World, reference: str, **change: object) -> PaymentEvent:
         currency="GBP",
         payment_id="pi_test_1",
     )
-    return replace(base, **change)  # type: ignore[arg-type]
+    return base.model_copy(update=change)
 
 
 def provider_of(world: World, reference: str) -> str | None:
@@ -491,13 +493,13 @@ def test_a_payment_refunded_in_full_outside_the_product_marks_the_booking_refund
     """The booking stays confirmed; only its payment status changes; a repeat or another account does nothing."""
     reference, _ = book(world)
     assert world.payments.record(paid(world, reference)) is True
-    refund = PaymentEvent(
-        provider="stripe", order_reference="", status="refunded", live=False, account_id=account(world),
+    refund = BookingPaymentEvent(
+        provider="stripe", status="refunded", live=False, account_id=account(world),
         amount_minor=2500, currency="GBP", payment_id="pi_test_1",
     )  # fmt: skip
-    assert world.payments.record(replace(refund, account_id="acct_other")) is False
-    assert world.payments.record(replace(refund, payment_id="pi_unknown")) is False
-    assert world.payments.record(replace(refund, provider="other")) is False
+    assert world.payments.record(refund.model_copy(update={"account_id": "acct_other"})) is False
+    assert world.payments.record(refund.model_copy(update={"payment_id": "pi_unknown"})) is False
+    assert world.payments.record(refund.model_copy(update={"provider": "stub"})) is False
     assert row(world, reference)[:2] == ("confirmed", "paid")
     assert world.payments.record(refund) is True
     assert row(world, reference)[:2] == ("confirmed", "refunded")
@@ -508,7 +510,7 @@ def test_a_refund_event_without_its_payment_or_account_does_nothing(world: World
     """An incomplete event never matches a booking."""
     reference, _ = book(world)
     world.payments.record(paid(world, reference))
-    incomplete = PaymentEvent(provider="stripe", order_reference="", status="refunded", live=False)
+    incomplete = BookingPaymentEvent(provider="stripe", status="refunded", live=False)
     assert world.payments.record(incomplete) is False
-    assert world.payments.record(replace(incomplete, payment_id="pi_test_1")) is False
+    assert world.payments.record(incomplete.model_copy(update={"payment_id": "pi_test_1"})) is False
     assert row(world, reference)[:2] == ("confirmed", "paid")
