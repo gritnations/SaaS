@@ -24,6 +24,7 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    ServiceChanges,
     Settings,
     TimeOff,
 )
@@ -34,7 +35,16 @@ from postgres import DatabaseUnavailableError
 ACCOUNT = "11111111-1111-4111-8111-111111111111"
 GOOD = {"Authorization": "Bearer good-token"}
 ENTRY_ID = "0b6c3f0e-6a8e-4d3e-9a51-0f3c1f2d9a10"
-BUSINESS = Business("internal-id", "example", "Example Advisory", "Europe/London", "GBP", 0, 240, 30)
+BUSINESS = Business(
+    id="internal-id",
+    slug="example",
+    name="Example Advisory",
+    time_zone="Europe/London",
+    currency="GBP",
+    break_minutes=0,
+    notice_minutes=240,
+    window_days=30,
+)
 BOOKING = OwnerBooking(
     "ZA2JBN2C5B",
     "confirmed",
@@ -49,7 +59,9 @@ BOOKING = OwnerBooking(
     None,
     datetime(2026, 10, 18, 16, 48, tzinfo=UTC),
 )
-SERVICE = OwnerServiceRecord("intro", "Introductory call", 30, 0, True, 1)
+SERVICE = OwnerServiceRecord(
+    slug="intro", name="Introductory call", duration_minutes=30, price_minor=0, active=True, sort_order=1
+)
 SETTINGS = Settings("Example Advisory", "Europe/London", "GBP", 0, 240, 30)
 
 
@@ -185,9 +197,7 @@ class FakeOwners:
         self._record("create_service", account, slug, service)
         return service
 
-    def update_service(
-        self, account: str, slug: str, service_slug: str, changes: dict[str, object]
-    ) -> OwnerServiceRecord:
+    def update_service(self, account: str, slug: str, service_slug: str, changes: ServiceChanges) -> OwnerServiceRecord:
         """Return the fixed service.
 
         Args:
@@ -213,7 +223,7 @@ class FakeOwners:
             The blocks.
         """
         self._record("hours", account, slug)
-        return [HoursBlock(1, time(9, 0), time(17, 0))]
+        return [HoursBlock(weekday=1, start=time(9, 0), end=time(17, 0))]
 
     def replace_hours(self, account: str, slug: str, blocks: list[HoursBlock]) -> list[HoursBlock]:
         """Echo the blocks.
@@ -240,7 +250,7 @@ class FakeOwners:
             The entries.
         """
         self._record("time_off", account, slug)
-        return [TimeOff(ENTRY_ID, date(2026, 11, 16), date(2026, 11, 20), "Leave")]
+        return [TimeOff(id=ENTRY_ID, first_day=date(2026, 11, 16), last_day=date(2026, 11, 20), note="Leave")]
 
     def add_time_off(
         self, account: str, slug: str, first_day: date, last_day: date, note: str | None
@@ -258,7 +268,7 @@ class FakeOwners:
             The entries and the number of bookings inside the new days off.
         """
         self._record("add_time_off", account, slug, first_day, last_day, note)
-        return [TimeOff(ENTRY_ID, first_day, last_day, note)], 2
+        return [TimeOff(id=ENTRY_ID, first_day=first_day, last_day=last_day, note=note)], 2
 
     def remove_time_off(self, account: str, slug: str, entry: str) -> list[TimeOff]:
         """Remove an entry and return what is left.
@@ -487,7 +497,7 @@ def test_updating_a_service_sends_only_the_fields_given() -> None:
     owners = FakeOwners()
     response = signed_in(owners).patch("/owner/businesses/example/services/intro", headers=GOOD, json={"active": False})
     assert response.status_code == 200
-    assert owners.calls[0][1][3] == {"active": False}
+    assert owners.calls[0][1][3] == ServiceChanges(active=False)
 
 
 @pytest.mark.parametrize(

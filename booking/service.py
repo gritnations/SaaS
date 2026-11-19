@@ -26,7 +26,7 @@ import json
 import logging
 import secrets
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated, Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -48,17 +48,29 @@ from booking.availability import (
 from booking.links import CustomerLinks, as_links
 from contracts import (
     STRICT,
+    AwareDatetime,
     BookingStatus,
+    BreakMinutes,
+    BusinessName,
+    BusinessSlug,
+    Currency,
     CustomerEmail,
     CustomerName,
     CustomerNote,
     CustomerPhone,
+    DurationMinutes,
     IdempotencyKey,
     ManageToken,
+    NoticeMinutes,
     PaymentStatus,
+    Plan,
+    PriceMinor,
     Reference,
     SecureUrl,
+    ServiceName,
     ServiceSlug,
+    WindowDays,
+    from_row,
 )
 from payments.base import AccountPayments, CheckoutOrder, ProviderUnavailableError
 from postgres import Database
@@ -121,8 +133,7 @@ class IdempotencyKeyReuseError(BookingError):
     """The idempotency key was already used for a different booking request."""
 
 
-@dataclass(frozen=True)
-class Business:
+class Business(BaseModel):
     """A business as the booking service needs it.
 
     Attributes:
@@ -148,24 +159,26 @@ class Business:
             field is never part of the row.
     """
 
-    id: str
-    slug: str
-    name: str
-    time_zone: str
-    currency: str
-    break_minutes: int
-    notice_minutes: int
-    window_days: int
-    payment_account_id: str | None = None
+    model_config = STRICT
+
+    id: Annotated[str, StringConstraints(min_length=1)]
+    slug: BusinessSlug
+    name: BusinessName
+    time_zone: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    currency: Currency
+    break_minutes: BreakMinutes
+    notice_minutes: NoticeMinutes
+    window_days: WindowDays
+    payment_account_id: Annotated[str, StringConstraints(min_length=1, max_length=255)] | None = None
     payments_enabled: bool = False
-    plan: str = "free"
-    trial_ends_at: datetime | None = None
+    plan: Plan = "free"
+    trial_ends_at: AwareDatetime | None = None
     pay_online: bool = False
     pay_at_venue: bool = True
-    public_address: str | None = None
-    public_phone: str | None = None
-    public_email: str | None = None
-    payment_options: tuple[str, ...] = ()
+    public_address: Annotated[str, StringConstraints(min_length=3, max_length=200)] | None = None
+    public_phone: Annotated[str, StringConstraints(min_length=5, max_length=32)] | None = None
+    public_email: Annotated[str, StringConstraints(min_length=3, max_length=254)] | None = None
+    payment_options: tuple[Annotated[str, StringConstraints(pattern="^(online|venue)$")], ...] = ()
 
     @property
     def zone(self) -> ZoneInfo:
@@ -183,8 +196,7 @@ class Business:
             raise NotFoundError("Business not found.") from None
 
 
-@dataclass(frozen=True)
-class Service:
+class Service(BaseModel):
     """A bookable service.
 
     Attributes:
@@ -195,11 +207,13 @@ class Service:
         price_minor: Price in minor units, such as pence. ``0`` means free.
     """
 
-    id: str
-    slug: str
-    name: str
-    duration_minutes: int
-    price_minor: int
+    model_config = STRICT
+
+    id: Annotated[str, StringConstraints(min_length=1)]
+    slug: ServiceSlug
+    name: ServiceName
+    duration_minutes: DurationMinutes
+    price_minor: PriceMinor
 
 
 @dataclass(frozen=True)
@@ -457,7 +471,7 @@ class BookingService:
         ).fetchone()
         if row is None:
             raise NotFoundError("Business not found.")
-        return Business(*row)
+        return from_row(Business, row)
 
     @staticmethod
     def _service(connection: psycopg.Connection[Any], business: Business, slug: str) -> Service:
@@ -481,7 +495,7 @@ class BookingService:
         ).fetchone()
         if row is None:
             raise NotFoundError("Service not found.")
-        return Service(*row)
+        return from_row(Service, row)
 
     @staticmethod
     def _blocks(connection: psycopg.Connection[Any], business: Business) -> dict[int, list[Block]]:
@@ -631,7 +645,8 @@ class BookingService:
                 "WHERE business_id = %s AND active ORDER BY sort_order, name",
                 (business.id,),
             ).fetchall()
-        return replace(business, payment_options=tuple(self.payment_options(business))), [Service(*row) for row in rows]
+        options = tuple(self.payment_options(business))
+        return business.model_copy(update={"payment_options": options}), [from_row(Service, row) for row in rows]
 
     def availability(
         self, business_slug: str, service_slug: str, start: date, days: int
@@ -687,7 +702,7 @@ class BookingService:
             return None
         if bytes(row[4]) != fingerprint:
             raise IdempotencyKeyReuseError("That key was already used for a different booking.")
-        service = Service(*row[5:10])
+        service = from_row(Service, row[5:10])
         start = row[3].astimezone(business.zone)
         slot = Slot(
             time=start.strftime("%H:%M"),

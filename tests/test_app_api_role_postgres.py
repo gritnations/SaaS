@@ -26,7 +26,7 @@ from test_signup_postgres import new
 
 from booking.manage import ManageService
 from booking.notify import Notifier
-from booking.owner import HoursBlock, OwnerService, OwnerServiceRecord
+from booking.owner import HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges
 from booking.service import BookingRequest, BookingService
 from postgres import Database, DatabaseSettings, PgConnection
 
@@ -192,9 +192,15 @@ def test_the_service_code_works_end_to_end_as_the_limited_role(world: World) -> 
         assert second.reference in {b.reference for b in listed}
         owners.cancel_booking(owner, slug, second.reference)
         owners.update_settings(owner, slug, {"window_days": 20})
-        owners.replace_hours(owner, slug, [HoursBlock(1, time(9, 0), time(17, 0))])
-        added = owners.create_service(owner, slug, OwnerServiceRecord("extra", "Extra", 30, 0, True, 0))
-        owners.update_service(owner, slug, added.slug, {"active": False})
+        owners.replace_hours(owner, slug, [HoursBlock(weekday=1, start=time(9, 0), end=time(17, 0))])
+        added = owners.create_service(
+            owner,
+            slug,
+            OwnerServiceRecord(
+                slug="extra", name="Extra", duration_minutes=30, price_minor=0, active=True, sort_order=0
+            ),
+        )
+        owners.update_service(owner, slug, added.slug, ServiceChanges(active=False))
         entries, _ = owners.add_time_off(
             owner, slug, date.today() + timedelta(days=40), date.today() + timedelta(days=41), "probe"
         )

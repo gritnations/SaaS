@@ -38,6 +38,7 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    ServiceChanges,
     Settings,
     TimeOff,
 )
@@ -127,9 +128,7 @@ class OwnerBackend(Protocol):
         """
         ...
 
-    def update_service(
-        self, account: str, slug: str, service_slug: str, changes: dict[str, object]
-    ) -> OwnerServiceRecord:
+    def update_service(self, account: str, slug: str, service_slug: str, changes: ServiceChanges) -> OwnerServiceRecord:
         """See :meth:`booking.owner.OwnerService.update_service`.
 
         Args:
@@ -1176,7 +1175,12 @@ def build_router(
             The stored service.
         """
         record = OwnerServiceRecord(
-            body.slug, body.name, body.duration_minutes, body.price_minor, body.active, body.sort_order
+            slug=body.slug,
+            name=body.name,
+            duration_minutes=body.duration_minutes,
+            price_minor=body.price_minor,
+            active=body.active,
+            sort_order=body.sort_order,
         )
         return _service_out(answer(lambda: service().create_service(who, business, record)))
 
@@ -1195,7 +1199,7 @@ def build_router(
         Returns:
             The updated service.
         """
-        changes = body.model_dump(exclude_none=True)
+        changes = ServiceChanges(**body.model_dump(exclude_none=True))
         return _service_out(answer(lambda: service().update_service(who, business, service_slug, changes)))
 
     @router.get("/businesses/{business}/hours", response_model=HoursOut)
@@ -1223,7 +1227,9 @@ def build_router(
         Returns:
             The stored blocks.
         """
-        blocks = [HoursBlock(b.weekday, _parse_time(b.start), _parse_time(b.end)) for b in body.blocks]
+        blocks = [
+            HoursBlock(weekday=b.weekday, start=_parse_time(b.start), end=_parse_time(b.end)) for b in body.blocks
+        ]
         return _hours_out(answer(lambda: service().replace_hours(who, business, blocks)))
 
     @router.get("/businesses/{business}/time-off", response_model=TimeOffListOut)

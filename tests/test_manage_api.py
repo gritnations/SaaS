@@ -25,13 +25,22 @@ from postgres import DatabaseUnavailableError
 
 LONDON = ZoneInfo("Europe/London")
 TOKEN = "0123456789abcdef" * 3
-BUSINESS = Business("internal-id", "example", "Example Advisory", "Europe/London", "GBP", 0, 240, 30)
+BUSINESS = Business(
+    id="internal-id",
+    slug="example",
+    name="Example Advisory",
+    time_zone="Europe/London",
+    currency="GBP",
+    break_minutes=0,
+    notice_minutes=240,
+    window_days=30,
+)
 START = datetime(2026, 11, 3, 9, 0, tzinfo=LONDON)
 MANAGED = ManagedBooking(
     reference="ZA2JBN2C5B",
     status="confirmed",
     business=BUSINESS,
-    service=Service("internal-service", "intro", "Introductory call", 30, 0),
+    service=Service(id="internal-service", slug="intro", name="Introductory call", duration_minutes=30, price_minor=0),
     starts_at=START,
     ends_at=START + timedelta(minutes=30),
     can_cancel=True,

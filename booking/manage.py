@@ -36,7 +36,7 @@ from booking.service import (
     hash_token,
     release_expired_holds,
 )
-from contracts import STRICT, AwareDatetime, BookingStatus, PaymentStatus, Reference
+from contracts import STRICT, AwareDatetime, BookingStatus, PaymentStatus, Reference, from_row
 from payments.base import BookingRefunds
 from postgres import Database
 
@@ -157,8 +157,8 @@ class ManageService:
         stored = bytes(row[5]) if row is not None and row[5] is not None else b""
         if row is None or not stored or not hmac.compare_digest(stored, hash_token(token)):
             raise NotFoundError("Booking not found.")
-        business = Business(*row[11:19])
-        service = Service(*row[6:11])
+        business = from_row(Business, row[11:19])
+        service = from_row(Service, row[6:11])
         now = self._clock()
         starts_at: datetime = row[3]
         cancel_cutoff, move_cutoff = int(row[19]), int(row[20])

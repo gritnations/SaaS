@@ -33,8 +33,17 @@ from contracts import (
 
 MIGRATIONS = Path(__file__).resolve().parent.parent / "migrations"
 LONDON = ZoneInfo("Europe/London")
-BUSINESS = Business("internal-business-id", "example", "Example Advisory", "Europe/London", "GBP", 0, 240, 30)
-SERVICE = Service("internal-service-id", "intro", "Introductory call", 30, 0)
+BUSINESS = Business(
+    id="internal-business-id",
+    slug="example",
+    name="Example Advisory",
+    time_zone="Europe/London",
+    currency="GBP",
+    break_minutes=0,
+    notice_minutes=240,
+    window_days=30,
+)
+SERVICE = Service(id="internal-service-id", slug="intro", name="Introductory call", duration_minutes=30, price_minor=0)
 SLOT = Slot(
     "09:00",
     "9:00 – 9:30 AM",

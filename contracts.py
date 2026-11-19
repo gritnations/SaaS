@@ -15,28 +15,35 @@ platform, after the API has accepted a request or a provider adapter has verifie
 import logging
 import re
 import unicodedata
-from typing import Annotated, Literal
+from collections.abc import Sequence
+from typing import Annotated, Any, Literal, TypeVar
 
-from pydantic import AfterValidator, AwareDatetime, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
 
 __all__ = [
     "AwareDatetime",
     "BUSINESS_SLUG_PATTERN",
     "BookingStatus",
+    "BreakMinutes",
+    "BusinessName",
     "BusinessSlug",
     "Currency",
     "CustomerEmail",
     "CustomerName",
     "CustomerNote",
     "CustomerPhone",
+    "DurationMinutes",
     "EMAIL_PATTERN",
     "IdempotencyKey",
     "ManageToken",
+    "NoticeMinutes",
     "ORDER_REFERENCE_PATTERN",
     "OrderReference",
     "PHONE_PATTERN",
     "PaidAmountMinor",
     "PaymentStatus",
+    "Plan",
+    "PriceMinor",
     "ProviderId",
     "ProviderName",
     "Reference",
@@ -46,9 +53,14 @@ __all__ = [
     "SITE_URL_PATTERN",
     "STRICT",
     "SecureUrl",
+    "ServiceName",
     "ServiceSlug",
     "SiteUrl",
+    "SortOrder",
     "TextRefusedError",
+    "Weekday",
+    "WindowDays",
+    "from_row",
     "clean_email",
     "clean_name",
     "clean_note",
@@ -56,6 +68,8 @@ __all__ = [
 ]
 
 LOGGER = logging.getLogger(__name__)
+
+RecordT = TypeVar("RecordT", bound=BaseModel)
 
 STRICT = ConfigDict(frozen=True, strict=True, extra="forbid")
 """The settings every internal contract uses."""
@@ -132,6 +146,36 @@ BookingStatus = Literal["pending_payment", "confirmed", "cancelled", "expired"]
 
 PaymentStatus = Literal["not_required", "awaiting", "paid", "at_venue", "refunded"]
 """A booking's payment status. Must equal the database's check list on ``bookings.payment_status``."""
+
+Plan = Literal["free", "starter", "pro"]
+"""A business's plan. Must equal the database's check list on ``businesses.plan``."""
+
+PriceMinor = Annotated[int, Field(ge=0, le=MAX_AMOUNT_MINOR)]
+"""A service's price in minor units. ``0`` means free."""
+
+DurationMinutes = Annotated[int, Field(ge=5, le=480)]
+"""A service's session length in minutes. The same limits as the database."""
+
+SortOrder = Annotated[int, Field(ge=0, le=10_000)]
+"""A service's display position. The same limits as the owner API."""
+
+Weekday = Annotated[int, Field(ge=0, le=6)]
+"""A day of the week: 0 = Sunday ... 6 = Saturday, as the database stores it."""
+
+BreakMinutes = Annotated[int, Field(ge=0, le=240)]
+"""The break between sessions, in minutes. The same limits as the database."""
+
+NoticeMinutes = Annotated[int, Field(ge=0, le=43_200)]
+"""How long before a session it may still be booked, in minutes. The same limits as the database."""
+
+WindowDays = Annotated[int, Field(ge=1, le=365)]
+"""How many days ahead, counting today, are open for booking. The same limits as the database."""
+
+BusinessName = Annotated[str, StringConstraints(min_length=1, max_length=120)]
+"""A business's display name, as stored. Shape only: the text rules apply where the name is entered."""
+
+ServiceName = Annotated[str, StringConstraints(min_length=1, max_length=120)]
+"""A service's display name, as stored. Shape only: the text rules apply where the name is entered."""
 
 EMAIL_PATTERN = r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$"
 """A plausible email address: a local part, one ``@``, and a domain with a dot."""
@@ -296,3 +340,24 @@ CustomerNote = Annotated[str, AfterValidator(clean_note)]
 
 CustomerPhone = Annotated[str, StringConstraints(pattern=PHONE_PATTERN)]
 """A customer's phone number."""
+
+
+def from_row(record: type[RecordT], row: Sequence[Any]) -> RecordT:
+    """Build a record from a database row whose columns are in the record's field order.
+
+    A row may leave out trailing fields, which then take their defaults.
+
+    Args:
+        record: The record type.
+        row: The row's values, in field order.
+
+    Returns:
+        The record, checked.
+
+    Raises:
+        ValueError: If the row has more columns than the record has fields.
+    """
+    fields = list(record.model_fields)
+    if len(row) > len(fields):
+        raise ValueError(f"{record.__name__} has {len(fields)} fields, the row has {len(row)} columns")
+    return record(**dict(zip(fields, row)))

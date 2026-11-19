@@ -18,7 +18,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
-from booking.owner import ConflictError, HoursBlock, OwnerService, OwnerServiceRecord
+from booking.owner import ConflictError, HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges
 from booking.service import BookingRequest, BookingService, NotFoundError
 from postgres import Database, DatabaseSettings
 
@@ -119,12 +119,16 @@ def test_an_owner_cannot_reach_another_business(pair: Pair) -> None:
         lambda: pair.owners.bookings(owner, other, datetime.now(UTC).date(), 7),
         lambda: pair.owners.booking_by_reference(owner, other, pair.ref_b),
         lambda: pair.owners.services(owner, other),
-        lambda: pair.owners.update_service(owner, other, "hour", {"active": False}),
+        lambda: pair.owners.update_service(owner, other, "hour", ServiceChanges(active=False)),
         lambda: pair.owners.hours(owner, other),
         lambda: pair.owners.replace_hours(owner, other, []),
         lambda: pair.owners.settings(owner, other),
         lambda: pair.owners.update_settings(owner, other, {"window_days": 2}),
-        lambda: pair.owners.create_service(owner, other, OwnerServiceRecord("x", "X", 30, 0, True, 0)),
+        lambda: pair.owners.create_service(
+            owner,
+            other,
+            OwnerServiceRecord(slug="xx", name="X", duration_minutes=30, price_minor=0, active=True, sort_order=0),
+        ),
     ]
     for attempt in attempts:
         with pytest.raises(NotFoundError):
@@ -143,14 +147,16 @@ def test_a_reference_is_found_only_in_its_own_business(pair: Pair) -> None:
 
 def test_owner_changes_show_on_the_public_side(pair: Pair) -> None:
     """Switching a service off hides it from customers; closing every day leaves no sessions."""
-    pair.owners.update_service(pair.owner_a, pair.a, "hour", {"active": False})
+    pair.owners.update_service(pair.owner_a, pair.a, "hour", ServiceChanges(active=False))
     _, public = pair.bookings.list_services(pair.a)
     assert public == []
-    pair.owners.update_service(pair.owner_a, pair.a, "hour", {"active": True})
+    pair.owners.update_service(pair.owner_a, pair.a, "hour", ServiceChanges(active=True))
     pair.owners.replace_hours(pair.owner_a, pair.a, [])
     _, _, days = pair.bookings.availability(pair.a, "hour", datetime.now(UTC).date(), 7)
     assert days == []
-    pair.owners.replace_hours(pair.owner_a, pair.a, [HoursBlock(d, time(9, 0), time(10, 0)) for d in range(7)])
+    pair.owners.replace_hours(
+        pair.owner_a, pair.a, [HoursBlock(weekday=d, start=time(9, 0), end=time(10, 0)) for d in range(7)]
+    )
     _, _, days = pair.bookings.availability(pair.a, "hour", datetime.now(UTC).date() + timedelta(days=1), 1)
     assert [slot.time for slot in days[0].slots] == ["09:00"]
 
@@ -181,4 +187,10 @@ def test_contact_details_saved_by_an_owner_reach_customers_in_the_same_fields(pa
 def test_duplicate_service_identifiers_are_a_conflict(pair: Pair) -> None:
     """A second service with an existing slug is refused."""
     with pytest.raises(ConflictError):
-        pair.owners.create_service(pair.owner_a, pair.a, OwnerServiceRecord("hour", "Again", 30, 0, True, 0))
+        pair.owners.create_service(
+            pair.owner_a,
+            pair.a,
+            OwnerServiceRecord(
+                slug="hour", name="Again", duration_minutes=30, price_minor=0, active=True, sort_order=0
+            ),
+        )

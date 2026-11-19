@@ -15,11 +15,12 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg import errors
+from pydantic import BaseModel, StringConstraints, model_validator
 
 from booking.refunds import refund_paid_booking
 from booking.service import (
@@ -30,6 +31,7 @@ from booking.service import (
     NotFoundError,
     online_payments_allowed,
 )
+from contracts import STRICT, DurationMinutes, PriceMinor, ServiceName, ServiceSlug, SortOrder, Weekday, from_row
 from payments.base import BookingRefunds
 from postgres import Database
 
@@ -206,8 +208,7 @@ class OwnerBooking:
     payment_status: str = "not_required"
 
 
-@dataclass(frozen=True)
-class OwnerServiceRecord:
+class OwnerServiceRecord(BaseModel):
     """A service as the owner manages it, including inactive ones.
 
     Attributes:
@@ -219,31 +220,54 @@ class OwnerServiceRecord:
         sort_order: Display position.
     """
 
-    slug: str
-    name: str
-    duration_minutes: int
-    price_minor: int
+    model_config = STRICT
+
+    slug: ServiceSlug
+    name: ServiceName
+    duration_minutes: DurationMinutes
+    price_minor: PriceMinor
     active: bool
-    sort_order: int
+    sort_order: SortOrder
 
 
-@dataclass(frozen=True)
-class HoursBlock:
+class ServiceChanges(BaseModel):
+    """Changes to a service. A field left as ``None`` is not changed.
+
+    Attributes:
+        name: Display name.
+        duration_minutes: Session length.
+        price_minor: Price in minor units.
+        active: Whether customers can see and book it.
+        sort_order: Display position.
+    """
+
+    model_config = STRICT
+
+    name: ServiceName | None = None
+    duration_minutes: DurationMinutes | None = None
+    price_minor: PriceMinor | None = None
+    active: bool | None = None
+    sort_order: SortOrder | None = None
+
+
+class HoursBlock(BaseModel):
     """One working block.
 
     Attributes:
         weekday: 0 = Sunday ... 6 = Saturday.
         start: Local start time.
-        end: Local end time, after ``start``.
+        end: Local end time, after ``start``. Checked by :meth:`OwnerService.replace_hours`, which answers a
+            clear error, rather than here.
     """
 
-    weekday: int
+    model_config = STRICT
+
+    weekday: Weekday
     start: time
     end: time
 
 
-@dataclass(frozen=True)
-class TimeOff:
+class TimeOff(BaseModel):
     """A run of whole local days the business is closed, on top of its weekly hours.
 
     Attributes:
@@ -253,10 +277,26 @@ class TimeOff:
         note: A private note for the owner, or ``None``.
     """
 
-    id: str
+    model_config = STRICT
+
+    id: Annotated[str, StringConstraints(min_length=1)]
     first_day: date
     last_day: date
-    note: str | None = None
+    note: Annotated[str, StringConstraints(max_length=100)] | None = None
+
+    @model_validator(mode="after")
+    def check_range(self) -> "TimeOff":
+        """Refuse a run that ends before it starts or is longer than the database allows.
+
+        Returns:
+            The entry.
+
+        Raises:
+            ValueError: If ``last_day`` is before ``first_day``, or more than 365 days after it.
+        """
+        if not 0 <= (self.last_day - self.first_day).days <= 365:
+            raise ValueError("last_day must be 0 to 365 days after first_day")
+        return self
 
 
 @dataclass(frozen=True)
@@ -345,7 +385,7 @@ class OwnerService:
         ).fetchone()
         if row is None:
             raise NotFoundError("Business not found.")
-        return Business(*row)
+        return from_row(Business, row)
 
     def memberships(self, account: str) -> list[Membership]:
         """List the businesses an account manages.
@@ -531,7 +571,7 @@ class OwnerService:
                 f"SELECT {_SERVICE_COLUMNS} FROM services WHERE business_id = %s ORDER BY sort_order, name",
                 (business.id,),
             ).fetchall()
-        return [OwnerServiceRecord(*row) for row in rows]
+        return [from_row(OwnerServiceRecord, row) for row in rows]
 
     def create_service(self, account: str, slug: str, service: OwnerServiceRecord) -> OwnerServiceRecord:
         """Add a service.
@@ -566,17 +606,17 @@ class OwnerService:
                 ).fetchone()
         except errors.UniqueViolation:
             raise ConflictError("A service with that identifier already exists.") from None
-        return OwnerServiceRecord(*row)  # type: ignore[misc]
+        assert row is not None  # an INSERT ... RETURNING always returns its row
+        return from_row(OwnerServiceRecord, row)
 
-    def update_service(self, account: str, slug: str, service_slug: str, changes: dict[str, Any]) -> OwnerServiceRecord:
+    def update_service(self, account: str, slug: str, service_slug: str, changes: ServiceChanges) -> OwnerServiceRecord:
         """Change some fields of a service. Existing bookings keep the times and price they were made with.
 
         Args:
             account: The verified account identifier.
             slug: The business's public identifier.
             service_slug: The service's identifier.
-            changes: Fields to change, from ``name``, ``duration_minutes``, ``price_minor``, ``active`` and
-                ``sort_order``. Values are validated by the API.
+            changes: The fields to change; a field left as ``None`` is not changed.
 
         Returns:
             The updated service.
@@ -584,8 +624,8 @@ class OwnerService:
         Raises:
             NotFoundError: If the account does not manage the business or the service does not exist.
         """
-        allowed = {"name", "duration_minutes", "price_minor", "active", "sort_order"}
-        fields = [field for field in changes if field in allowed]
+        values = changes.model_dump(exclude_none=True)
+        fields = list(values)
         with self._database.connection() as connection:
             business = self._member_business(connection, account, slug)
             if fields:
@@ -593,7 +633,7 @@ class OwnerService:
                 row = connection.execute(
                     f"UPDATE services SET {assignments} WHERE business_id = %s AND slug = %s "
                     f"RETURNING {_SERVICE_COLUMNS}",
-                    (*[changes[field] for field in fields], business.id, service_slug),
+                    (*[values[field] for field in fields], business.id, service_slug),
                 ).fetchone()
             else:
                 row = connection.execute(
@@ -602,7 +642,7 @@ class OwnerService:
                 ).fetchone()
         if row is None:
             raise NotFoundError("Service not found.")
-        return OwnerServiceRecord(*row)
+        return from_row(OwnerServiceRecord, row)
 
     def hours(self, account: str, slug: str) -> list[HoursBlock]:
         """List the working blocks.
@@ -624,7 +664,7 @@ class OwnerService:
                 "ORDER BY weekday, start_time",
                 (business.id,),
             ).fetchall()
-        return [HoursBlock(*row) for row in rows]
+        return [from_row(HoursBlock, row) for row in rows]
 
     def replace_hours(self, account: str, slug: str, blocks: list[HoursBlock]) -> list[HoursBlock]:
         """Replace all working blocks in one transaction. Existing bookings are not affected.
@@ -674,7 +714,7 @@ class OwnerService:
             "WHERE business_id = %s AND last_day >= %s ORDER BY first_day, last_day, created_at",
             (business.id, today),
         ).fetchall()
-        return [TimeOff(*row) for row in rows]
+        return [from_row(TimeOff, row) for row in rows]
 
     def time_off(self, account: str, slug: str) -> list[TimeOff]:
         """List the days off that are current or upcoming.
