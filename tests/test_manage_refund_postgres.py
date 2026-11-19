@@ -90,7 +90,14 @@ def owner_manager(world: World, refunds: FakeRefunds | None) -> OwnerService:
     )
 
 
-def set_payment(world: World, reference: str, status: str, price: int = 1500, provider: str | None = "stripe") -> None:
+def set_payment(
+    world: World,
+    reference: str,
+    status: str,
+    price: int = 1500,
+    provider: str | None = "stripe",
+    payment: str = PAYMENT,
+) -> None:
     """Make a booking look paid (or otherwise) and give the business a payment account.
 
     Args:
@@ -98,7 +105,9 @@ def set_payment(world: World, reference: str, status: str, price: int = 1500, pr
         reference: The booking.
         status: The payment status to set.
         price: The booking's price in minor units.
-        provider: The gateway recorded as having taken the payment.
+        provider: The gateway recorded as having taken the payment. With ``None`` no payment identifier is
+            recorded either, because the database refuses a payment identifier without its gateway.
+        payment: The gateway's payment identifier. Each payment belongs to one booking only.
     """
     online = status in ("paid", "refunded")
     with world.database.connection() as connection:
@@ -106,7 +115,7 @@ def set_payment(world: World, reference: str, status: str, price: int = 1500, pr
         connection.execute(
             "UPDATE bookings SET payment_status = %s, price_minor = %s, payment_id = %s, payment_provider = %s "
             "WHERE reference = %s",
-            (status, price, PAYMENT if online else None, provider if online else None, reference),
+            (status, price, payment if online and provider else None, provider if online else None, reference),
         )
 
 
@@ -270,7 +279,7 @@ def test_a_booking_already_refunded_by_hand_is_cancelled_without_a_second_refund
     reference, token = book(world)
     other, _ = book(world, "12:00")
     for ref in (reference, other):
-        set_payment(world, ref, "refunded")
+        set_payment(world, ref, "refunded", payment=f"{PAYMENT}_{ref}")
     refunds = FakeRefunds()
     manager(world, refunds).cancel(world.slug, reference, token)
     owner_manager(world, refunds).cancel_booking(world.owner, world.slug, other)
