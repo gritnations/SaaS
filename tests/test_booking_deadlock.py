@@ -61,7 +61,15 @@ def database(failure: Exception) -> Database:
     return cast(Database, FailingDatabase(failure))
 
 
-REQUEST = BookingRequest("hour", date(2026, 11, 20), "10:00", "Test Customer", "customer@example.com", None, None)
+REQUEST = BookingRequest(
+    service="hour",
+    date=date(2026, 11, 20),
+    time="10:00",
+    name="Test Customer",
+    email="customer@example.com",
+    phone=None,
+    note=None,
+)
 
 
 def test_a_deadlock_while_booking_is_answered_as_the_time_being_taken() -> None:

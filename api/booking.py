@@ -18,6 +18,7 @@ from typing import Annotated
 from fastapi import APIRouter, Header, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 
+import contracts
 from booking.availability import Slot
 from booking.service import (
     MAX_DAYS_PER_REQUEST,
@@ -29,13 +30,13 @@ from booking.service import (
     PaymentUnavailableError,
     SlotTakenError,
 )
+from contracts import BUSINESS_SLUG_PATTERN, SERVICE_SLUG_PATTERN, CustomerEmail, CustomerName, CustomerNote
 from postgres import DatabaseUnavailableError
 
-SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$"
-EMAIL_PATTERN = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$")
-PHONE_PATTERN = re.compile(r"^[0-9+()\- ]{5,32}$")
+EMAIL_PATTERN = re.compile(contracts.EMAIL_PATTERN)
+PHONE_PATTERN = re.compile(contracts.PHONE_PATTERN)
 
-Slug = Annotated[str, Path(pattern=SLUG_PATTERN)]
+Slug = Annotated[str, Path(pattern=BUSINESS_SLUG_PATTERN)]
 """A business slug as it appears in a request path."""
 
 IdempotencyKey = Annotated[str | None, Header(alias="Idempotency-Key", pattern=r"^[A-Za-z0-9_-]{8,128}$")]
@@ -145,41 +146,23 @@ class BookingBody(BaseModel):
         service: Service slug.
         date: Local date.
         time: Local start time as ``HH:MM``.
-        name: Customer name, 1 to 100 characters.
-        email: Customer email.
+        name: Customer name, 1 to 100 characters once normalised, with no hidden characters.
+        email: Customer email: normalised, in a single script, with no hidden characters.
         phone: Customer phone, optional.
-        note: Customer's note or question, optional, up to 1000 characters.
+        note: Customer's note or question, optional, up to 1000 characters, with no hidden characters.
         pay: ``online`` or ``venue`` for a paid service, optional. Omitted means online when offered.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    service: Annotated[str, StringConstraints(pattern=SLUG_PATTERN)]
+    service: Annotated[str, StringConstraints(pattern=SERVICE_SLUG_PATTERN)]
     date: date
     time: Annotated[str, StringConstraints(pattern=r"^\d{2}:\d{2}$")]
-    name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
-    email: Annotated[str, StringConstraints(max_length=254)]
+    name: CustomerName
+    email: CustomerEmail
     phone: Annotated[str, StringConstraints(max_length=32)] | None = None
-    note: Annotated[str, StringConstraints(max_length=1000)] | None = None
+    note: CustomerNote | None = None
     pay: Annotated[str, StringConstraints(pattern="^(online|venue)$")] | None = None
-
-    @field_validator("email")
-    @classmethod
-    def check_email(cls, value: str) -> str:
-        """Accept only a plausible email address.
-
-        Args:
-            value: The submitted address.
-
-        Returns:
-            The address.
-
-        Raises:
-            ValueError: If it is not a plausible address.
-        """
-        if not EMAIL_PATTERN.match(value):
-            raise ValueError("not an email address")
-        return value
 
     @field_validator("phone", "note")
     @classmethod
@@ -332,7 +315,7 @@ def build_router(backend: Callable[[], BookingBackend | None]) -> APIRouter:
     @router.get("/availability", response_model=AvailabilityOut)
     def availability(
         business: Slug,
-        service: Annotated[str, Query(pattern=SLUG_PATTERN)],
+        service: Annotated[str, Query(pattern=SERVICE_SLUG_PATTERN)],
         start: date,
         days: Annotated[int, Query(ge=1, le=MAX_DAYS_PER_REQUEST)] = 7,
     ) -> AvailabilityOut:

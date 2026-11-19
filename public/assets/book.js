@@ -36,10 +36,10 @@ const state = {
  * @returns {string} The slug, or "" when there is none.
  */
 function readSlug() {
-  const fromPath = location.pathname.match(/^\/book\/([a-z0-9][a-z0-9-]{0,38}[a-z0-9])\/?$/);
+  const fromPath = location.pathname.match(/^\/book\/([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\/?$/);
   if (fromPath) return fromPath[1];
   const fromQuery = new URLSearchParams(location.search).get("b") || "";
-  return /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(fromQuery) ? fromQuery : "";
+  return /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(fromQuery) ? fromQuery : "";
 }
 
 /**

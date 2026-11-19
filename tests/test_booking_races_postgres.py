@@ -144,7 +144,15 @@ def request(world: World, service: str, start: str) -> BookingRequest:
     Returns:
         The request.
     """
-    return BookingRequest(service, world.day, start, "Test Customer", "customer@example.com", None, None)
+    return BookingRequest(
+        service=service,
+        date=world.day,
+        time=start,
+        name="Test Customer",
+        email="customer@example.com",
+        phone=None,
+        note=None,
+    )
 
 
 def live_starts(world: World) -> list[str]:

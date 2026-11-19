@@ -228,7 +228,15 @@ def book(world: World, start: str = "10:00", service: str = "cut") -> tuple[str,
     Returns:
         The reference and the checkout link.
     """
-    request = BookingRequest(service, world.day, start, "Test Customer", "customer@example.com", None, None)
+    request = BookingRequest(
+        service=service,
+        date=world.day,
+        time=start,
+        name="Test Customer",
+        email="customer@example.com",
+        phone=None,
+        note=None,
+    )
     made = world.bookings.create_booking(world.slug, request)
     return made.reference, made.checkout_url
 

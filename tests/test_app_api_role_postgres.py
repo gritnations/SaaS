@@ -179,14 +179,14 @@ def test_the_service_code_works_end_to_end_as_the_limited_role(world: World) -> 
         _, _, days = bookings.availability(slug, "hour", day, 1)  # type: ignore[arg-type]
         assert any(s.available for s in days[0].slots)
         confirmed = bookings.create_booking(
-            slug, BookingRequest("hour", day, "10:00", "Pat Customer", "pat@example.com", None, None)  # type: ignore[arg-type]
+            slug, BookingRequest(service="hour", date=day, time="10:00", name="Pat Customer", email="pat@example.com", phone=None, note=None)  # type: ignore[arg-type]
         )
         assert confirmed.manage_token is not None
         assert manage.view(slug, confirmed.reference, confirmed.manage_token).status == "confirmed"
         assert manage.move(slug, confirmed.reference, confirmed.manage_token, day, "11:00").status == "confirmed"  # type: ignore[arg-type]
         assert manage.cancel(slug, confirmed.reference, confirmed.manage_token).status == "cancelled"
         second = bookings.create_booking(
-            slug, BookingRequest("hour", day, "13:00", "Sam Customer", "sam@example.com", None, None)  # type: ignore[arg-type]
+            slug, BookingRequest(service="hour", date=day, time="13:00", name="Sam Customer", email="sam@example.com", phone=None, note=None)  # type: ignore[arg-type]
         )
         _, listed = owners.bookings(owner, slug, day, 1)  # type: ignore[arg-type]
         assert second.reference in {b.reference for b in listed}

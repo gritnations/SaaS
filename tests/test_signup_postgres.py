@@ -125,7 +125,16 @@ def test_owners_are_isolated_and_customers_can_book_at_once(database: Database) 
     while day.weekday() > 4:
         day += timedelta(days=1)
     confirmed = bookings.create_booking(
-        made.slug, BookingRequest("intro", day, "10:00", "Test Customer", "customer@example.com", None, None)
+        made.slug,
+        BookingRequest(
+            service="intro",
+            date=day,
+            time="10:00",
+            name="Test Customer",
+            email="customer@example.com",
+            phone=None,
+            note=None,
+        ),
     )
     _, listed = owners.bookings(account, made.slug, day, 1)
     assert [b.reference for b in listed] == [confirmed.reference]
@@ -150,7 +159,16 @@ def test_a_business_outside_the_uk_gets_its_own_zone_and_currency(database: Data
     while day.weekday() > 4:
         day += timedelta(days=1)
     bookings.create_booking(
-        made.slug, BookingRequest("intro", day, "10:00", "Test Customer", "customer@example.com", None, None)
+        made.slug,
+        BookingRequest(
+            service="intro",
+            date=day,
+            time="10:00",
+            name="Test Customer",
+            email="customer@example.com",
+            phone=None,
+            note=None,
+        ),
     )
     _, [listed] = owners.bookings(account, made.slug, day, 1)
     assert listed.starts_at == datetime(day.year, day.month, day.day, 10, 0, tzinfo=riyadh)

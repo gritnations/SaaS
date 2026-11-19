@@ -300,7 +300,7 @@ def create_api(
     if isinstance(probe, Database):
         site_url = site_url_from_environment(env)
         pages_url = site_url_from_environment(env, PAGES_URL_ENV)
-        links = CustomerLinks(pages_url, pages=True) if pages_url else site_url
+        links = CustomerLinks(base=pages_url, pages=True) if pages_url else site_url
         notifier = Notifier(probe, mailer_from_environment(env), links, sender_domain(env))
         refunds = {stripe_provider.name: stripe_provider} if stripe_provider is not None else {}
         if bookings is None:

@@ -28,11 +28,12 @@ import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 from psycopg import errors
+from pydantic import BaseModel, InstanceOf, StringConstraints
 
 from booking.availability import (
     Block,
@@ -45,6 +46,20 @@ from booking.availability import (
     weekday_index,
 )
 from booking.links import CustomerLinks, as_links
+from contracts import (
+    STRICT,
+    BookingStatus,
+    CustomerEmail,
+    CustomerName,
+    CustomerNote,
+    CustomerPhone,
+    IdempotencyKey,
+    ManageToken,
+    PaymentStatus,
+    Reference,
+    SecureUrl,
+    ServiceSlug,
+)
 from payments.base import AccountPayments, CheckoutOrder, ProviderUnavailableError
 from postgres import Database
 
@@ -200,9 +215,9 @@ class DayAvailability:
     slots: list[Slot]
 
 
-@dataclass(frozen=True)
-class BookingRequest:
-    """What a customer asks for. Validated for shape by the API before it arrives here.
+class BookingRequest(BaseModel):
+    """What a customer asks for. The API checks the same rules before it arrives here, with the same types, so a
+    request the API accepts is never refused here.
 
     Attributes:
         service: Service slug.
@@ -218,19 +233,20 @@ class BookingRequest:
             request with the same key returns the booking already made. ``None`` means no repeat protection.
     """
 
-    service: str
+    model_config = STRICT
+
+    service: ServiceSlug
     date: date
-    time: str
-    name: str
-    email: str
-    phone: str | None
-    note: str | None
-    pay: str | None = None
-    idempotency_key: str | None = None
+    time: Annotated[str, StringConstraints(pattern=r"^\d{2}:\d{2}$")]
+    name: CustomerName
+    email: CustomerEmail
+    phone: CustomerPhone | None
+    note: CustomerNote | None
+    pay: Annotated[str, StringConstraints(pattern="^(online|venue)$")] | None = None
+    idempotency_key: IdempotencyKey | None = None
 
 
-@dataclass(frozen=True)
-class Confirmation:
+class Confirmation(BaseModel):
     """A new booking, as returned to the customer.
 
     Attributes:
@@ -239,20 +255,24 @@ class Confirmation:
         slot: The booked session.
         manage_token: The manage code, given once to the person who booked. Only its hash is stored. A
             paid booking gets its code by email once the payment is confirmed.
-        status: ``confirmed``, or ``pending_payment`` while a paid booking waits for its payment.
+        status: ``confirmed``, or ``pending_payment`` while a paid booking waits for its payment. A replay
+            reports the booking's current status, which may be any booking status.
         checkout_url: Where to pay, for a booking paid online.
-        payment_status: ``not_required``, ``awaiting`` (paying online) or ``at_venue``.
+        payment_status: ``not_required``, ``awaiting`` (paying online) or ``at_venue``; on a replay, the
+            booking's current payment status.
         replayed: ``True`` when this is a booking made by an earlier request with the same idempotency key. It
             carries no manage code and no checkout link, which are not stored.
     """
 
-    reference: str
-    service: Service
-    slot: Slot
-    manage_token: str | None = None
-    status: str = "confirmed"
-    checkout_url: str | None = None
-    payment_status: str = "not_required"
+    model_config = STRICT
+
+    reference: Reference
+    service: InstanceOf[Service]
+    slot: InstanceOf[Slot]
+    manage_token: ManageToken | None = None
+    status: BookingStatus = "confirmed"
+    checkout_url: SecureUrl | None = None
+    payment_status: PaymentStatus = "not_required"
     replayed: bool = False
 
 
@@ -676,7 +696,9 @@ class BookingService:
             ends_at=start + timedelta(minutes=service.duration_minutes),
             available=False,
         )
-        return Confirmation(row[0], service, slot, None, row[1], None, row[2], replayed=True)
+        return Confirmation(
+            reference=row[0], service=service, slot=slot, status=row[1], payment_status=row[2], replayed=True
+        )
 
     def _find_replay(self, business_slug: str, key: str, fingerprint: bytes) -> Confirmation | None:
         """Look for an earlier booking under the key, in a fresh transaction, after a clash on insert.
@@ -794,10 +816,19 @@ class BookingService:
         if not paid:
             if self._notifier is not None:
                 self._notifier.booking_event("confirmed", booking_id, token)
-            status = "at_venue" if method == "venue" else "not_required"
-            return Confirmation(reference, service, slot, token, payment_status=status)
+            status: PaymentStatus = "at_venue" if method == "venue" else "not_required"
+            return Confirmation(
+                reference=reference, service=service, slot=slot, manage_token=token, payment_status=status
+            )
         checkout_url = self._start_checkout(business, service, reference, request.email, booking_id, hold_expires_at)
-        return Confirmation(reference, service, slot, None, "pending_payment", checkout_url, "awaiting")
+        return Confirmation(
+            reference=reference,
+            service=service,
+            slot=slot,
+            status="pending_payment",
+            checkout_url=checkout_url,
+            payment_status="awaiting",
+        )
 
     def payment_options(self, business: Business) -> list[str]:
         """List how the business's customers can pay for a paid service now.

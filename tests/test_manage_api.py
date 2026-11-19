@@ -5,7 +5,6 @@ right answers with one generic not-found, the booking answer returns the manage 
 owner can cancel and change the new settings. Database behaviour is covered by ``test_manage_postgres.py``.
 """
 
-import dataclasses
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -76,7 +75,7 @@ class FakeManage:
         self.calls.append((name, args))
         if self.fail_with is not None:
             raise self.fail_with
-        return dataclasses.replace(MANAGED, status="cancelled", can_cancel=False) if name == "cancel" else MANAGED
+        return MANAGED.model_copy(update={"status": "cancelled", "can_cancel": False}) if name == "cancel" else MANAGED
 
     def view(self, slug: str, reference: str, token: str) -> ManagedBooking:
         """Answer a view.
@@ -229,7 +228,7 @@ def test_the_booking_shows_whether_its_card_payment_is_paid_or_refunded(
             Returns:
                 The booking.
             """
-            return dataclasses.replace(MANAGED, payment_status=payment_status)
+            return MANAGED.model_copy(update={"payment_status": payment_status})
 
     body = client_for(Paid()).post(f"{PATH}/manage", json={"token": TOKEN}).json()
     assert (body["paid_online"], body["refunded"]) == (paid_online, refunded)

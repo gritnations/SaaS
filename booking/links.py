@@ -8,22 +8,25 @@ The manage code always travels after ``#``, so it never reaches a server's logs.
 plans) are not built here; they still return to ``PUBLIC_SITE_URL``.
 """
 
-from dataclasses import dataclass
+from pydantic import BaseModel
+
+from contracts import STRICT, SiteUrl
 
 PAGES_URL_ENV = "BOOKING_PAGES_URL"
 """Where the product pages are served. When set, customer links use the product pages layout."""
 
 
-@dataclass(frozen=True)
-class CustomerLinks:
+class CustomerLinks(BaseModel):
     """Builds customer-facing links.
 
     Attributes:
-        base: The site, without a trailing slash.
+        base: The site, without a trailing slash: ``https://``, or ``http://localhost`` in development.
         pages: ``True`` for the product pages layout, ``False`` for the staging page layout.
     """
 
-    base: str
+    model_config = STRICT
+
+    base: SiteUrl
     pages: bool = False
 
     def booking(self, slug: str) -> str:
@@ -64,4 +67,4 @@ def as_links(value: str | CustomerLinks | None) -> CustomerLinks | None:
     """
     if value is None or isinstance(value, CustomerLinks):
         return value
-    return CustomerLinks(value)
+    return CustomerLinks(base=value)
