@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from booking.owner import ConflictError, InvalidChangeError, NewBusiness, OwnerService, slugify
 from booking.service import BookingRequest, BookingService, NotFoundError
@@ -60,7 +61,14 @@ def new(name: str, business_type: str = "barbershop", other: str | None = None, 
     Returns:
         The details.
     """
-    return NewBusiness(name, business_type, other, "Sample Owner", "free", "owner@example.com", region)
+    return NewBusiness(
+        name=name,
+        business_type=business_type,
+        business_type_other=other,
+        owner_name="Sample Owner",
+        contact_email="owner@example.com",
+        region=region,
+    )
 
 
 def test_a_new_business_gets_its_defaults(database: Database) -> None:
@@ -190,10 +198,8 @@ def test_each_region_sets_its_zone_and_currency_and_an_unknown_one_is_refused(da
         made = owners.create_business(account, new(f"Signup Test {tag} {region}", region=region))
         settings = owners.settings(account, made.slug)
         assert (settings.time_zone, settings.currency) == pair
-    account = str(uuid.uuid4())
-    with pytest.raises(InvalidChangeError):
-        owners.create_business(account, new(f"Signup Test {tag} Nowhere", region="mars"))
-    assert owners.memberships(account) == []
+    with pytest.raises(ValidationError):
+        new(f"Signup Test {tag} Nowhere", region="mars")
 
 
 @pytest.mark.parametrize(

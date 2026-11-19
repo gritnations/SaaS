@@ -26,7 +26,7 @@ from test_signup_postgres import new
 
 from booking.manage import ManageService
 from booking.notify import Notifier
-from booking.owner import HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges
+from booking.owner import HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges, SettingsChanges
 from booking.service import BookingRequest, BookingService
 from postgres import Database, DatabaseSettings, PgConnection
 
@@ -191,7 +191,7 @@ def test_the_service_code_works_end_to_end_as_the_limited_role(world: World) -> 
         _, listed = owners.bookings(owner, slug, day, 1)  # type: ignore[arg-type]
         assert second.reference in {b.reference for b in listed}
         owners.cancel_booking(owner, slug, second.reference)
-        owners.update_settings(owner, slug, {"window_days": 20})
+        owners.update_settings(owner, slug, SettingsChanges(window_days=20))
         owners.replace_hours(owner, slug, [HoursBlock(weekday=1, start=time(9, 0), end=time(17, 0))])
         added = owners.create_service(
             owner,

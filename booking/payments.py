@@ -25,10 +25,11 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol, get_args
 
 import psycopg
 from psycopg import errors
+from pydantic import BaseModel, StringConstraints
 
 from booking.service import (
     MANAGE_TOKEN_BYTES,
@@ -38,6 +39,7 @@ from booking.service import (
     hash_token,
     online_payments_allowed,
 )
+from contracts import STRICT, ProviderName
 from payments.base import AccountPayments, BookingPaymentEvent, ProviderUnavailableError
 from postgres import Database
 
@@ -60,8 +62,7 @@ class InvalidOptionsError(BookingError):
     """The payment options asked for are not allowed, such as offering no way to pay."""
 
 
-@dataclass(frozen=True)
-class PaymentSettings:
+class PaymentSettings(BaseModel):
     """A business's payment set-up, as its owner sees it.
 
     Attributes:
@@ -73,7 +74,9 @@ class PaymentSettings:
         pay_at_venue: The business offers payment at the venue.
     """
 
-    provider: str
+    model_config = STRICT
+
+    provider: Annotated[str, StringConstraints(pattern="^(" + "|".join(get_args(ProviderName)) + ")$")]
     connected: bool
     enabled: bool
     online_allowed: bool = False
@@ -272,12 +275,12 @@ class PaymentService:
             The set-up.
         """
         return PaymentSettings(
-            self._provider.name,
-            business.payment_account_id is not None,
-            ready,
-            business.online_allowed,
-            business.pay_online if pay_online is None else pay_online,
-            business.pay_at_venue if pay_at_venue is None else pay_at_venue,
+            provider=self._provider.name,
+            connected=business.payment_account_id is not None,
+            enabled=ready,
+            online_allowed=business.online_allowed,
+            pay_online=business.pay_online if pay_online is None else pay_online,
+            pay_at_venue=business.pay_at_venue if pay_at_venue is None else pay_at_venue,
         )
 
     def set_options(

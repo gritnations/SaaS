@@ -298,7 +298,7 @@ def test_new_settings_are_validated_and_empty_values_clear() -> None:
         json={"cancel_cutoff_minutes": 120, "contact_email": "", "meeting_link": "https://meet.example.com/x"},
     )
     assert ok.status_code == 200
-    assert owners.calls[-1][1][2] == {
+    assert owners.calls[-1][1][2].values() == {
         "cancel_cutoff_minutes": 120,
         "contact_email": None,
         "meeting_link": "https://meet.example.com/x",
@@ -328,7 +328,7 @@ def test_public_contact_details_are_validated_and_empty_values_clear() -> None:
         json={"public_address": "1 High Street, London", "public_phone": "020 7946 0000", "public_email": ""},
     )
     assert ok.status_code == 200
-    assert owners.calls[-1][1][2] == {
+    assert owners.calls[-1][1][2].values() == {
         "public_address": "1 High Street, London",
         "public_phone": "020 7946 0000",
         "public_email": None,

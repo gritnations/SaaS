@@ -47,7 +47,14 @@ class TrialOwners(FakeOwners):
             The membership.
         """
         self.calls.append(("create_business", (account, new)))
-        return Membership("new-company", new.name, "owner", new.owner_name, "free", "active", TRIAL_END, True)
+        return Membership(
+            slug="new-company",
+            name=new.name,
+            role="owner",
+            display_name=new.owner_name,
+            trial_ends_at=TRIAL_END,
+            online_payments=True,
+        )
 
 
 class FakeBilling:

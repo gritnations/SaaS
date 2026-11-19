@@ -16,6 +16,7 @@ import logging
 import re
 import unicodedata
 from collections.abc import Sequence
+from functools import partial
 from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
@@ -32,23 +33,34 @@ __all__ = [
     "CustomerName",
     "CustomerNote",
     "CustomerPhone",
+    "CutoffMinutes",
+    "DisplayName",
     "DurationMinutes",
     "EMAIL_PATTERN",
     "IdempotencyKey",
     "ManageToken",
+    "MeetingLink",
     "NoticeMinutes",
     "ORDER_REFERENCE_PATTERN",
     "OrderReference",
+    "OwnerAddress",
+    "OwnerBusinessName",
+    "OwnerBusinessType",
+    "OwnerEmail",
+    "OwnerName",
+    "OwnerServiceName",
     "PHONE_PATTERN",
     "PaidAmountMinor",
     "PaymentStatus",
     "Plan",
+    "PlanStatus",
     "PriceMinor",
     "ProviderId",
     "ProviderName",
     "Reference",
     "ReportedAmountMinor",
     "ReturnUrl",
+    "Role",
     "SERVICE_SLUG_PATTERN",
     "SITE_URL_PATTERN",
     "STRICT",
@@ -57,13 +69,20 @@ __all__ = [
     "ServiceSlug",
     "SiteUrl",
     "SortOrder",
+    "StoredAddress",
+    "StoredEmail",
+    "StoredLink",
+    "StoredPhone",
     "TextRefusedError",
+    "TimeOffNote",
+    "TimeZoneName",
     "Weekday",
     "WindowDays",
-    "from_row",
+    "clean_business_name",
     "clean_email",
     "clean_name",
     "clean_note",
+    "from_row",
     "scripts",
 ]
 
@@ -177,6 +196,37 @@ BusinessName = Annotated[str, StringConstraints(min_length=1, max_length=120)]
 ServiceName = Annotated[str, StringConstraints(min_length=1, max_length=120)]
 """A service's display name, as stored. Shape only: the text rules apply where the name is entered."""
 
+PlanStatus = Literal["active", "past_due"]
+"""Whether a business's plan is paid up. Must equal the database's check list on ``businesses.plan_status``."""
+
+Role = Literal["owner"]
+"""An account's role in a business. Must equal the database's check list on ``business_members.role``."""
+
+CutoffMinutes = Annotated[int, Field(ge=0, le=43_200)]
+"""How long before a session a customer may still cancel or move it online, in minutes. The same limits as the
+database."""
+
+TimeZoneName = Annotated[str, StringConstraints(min_length=1, max_length=64)]
+"""An IANA time zone name, as stored. Length only: an unknown zone is handled where it is used."""
+
+StoredEmail = Annotated[str, StringConstraints(min_length=3, max_length=254)]
+"""An email address, as stored. Shape only: the text rules apply where the address is entered."""
+
+StoredAddress = Annotated[str, StringConstraints(min_length=3, max_length=200)]
+"""A public address, as stored. Shape only: the text rules apply where the address is entered."""
+
+StoredPhone = Annotated[str, StringConstraints(min_length=5, max_length=32)]
+"""A phone number, as stored. The same limits as the database."""
+
+StoredLink = Annotated[str, StringConstraints(pattern=r"^https://", max_length=500)]
+"""A meeting link, as stored: ``https://`` and up to 500 characters, the same check as the database."""
+
+DisplayName = Annotated[str, StringConstraints(min_length=1, max_length=100)]
+"""An owner's name, as stored. Shape only: the text rules apply where the name is entered."""
+
+MeetingLink = Annotated[str, StringConstraints(pattern=r"^https://\S{4,}$", max_length=500)]
+"""A meeting link as an owner enters it: ``https://``, no spaces, 12 to 500 characters."""
+
 EMAIL_PATTERN = r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$"
 """A plausible email address: a local part, one ``@``, and a domain with a dot."""
 
@@ -245,7 +295,7 @@ def scripts(value: str) -> set[str]:
     }
 
 
-def clean_name(value: str, field: str = "name", max_length: int = 100) -> str:
+def clean_name(value: str, field: str = "name", max_length: int = 100, min_length: int = 1) -> str:
     """Normalise a person's name and refuse hidden characters.
 
     The text is normalised (NFKC), so look-alike forms such as full-width letters become ordinary ones, and
@@ -256,12 +306,14 @@ def clean_name(value: str, field: str = "name", max_length: int = 100) -> str:
         value: The name as typed.
         field: The field name used in the log and the error.
         max_length: The longest name accepted once cleaned.
+        min_length: The shortest name accepted once cleaned.
 
     Returns:
         The cleaned name.
 
     Raises:
-        TextRefusedError: If the name has control or direction characters, or is empty or too long once cleaned.
+        TextRefusedError: If the name has control or direction characters, or is empty, too short or too long once
+            cleaned.
     """
     text = unicodedata.normalize("NFKC", value)
     if _has_controls(text):
@@ -271,8 +323,33 @@ def clean_name(value: str, field: str = "name", max_length: int = 100) -> str:
     text = "".join(char for char in text if char not in _ZERO_WIDTH).strip()
     if not text:
         raise _refuse(field, "empty")
+    if len(text) < min_length:
+        raise _refuse(field, "too_short")
     if len(text) > max_length:
         raise _refuse(field, "too_long")
+    return text
+
+
+def clean_business_name(value: str, field: str = "business_name") -> str:
+    """Clean a business name as a person's name, and refuse a word that mixes scripts.
+
+    Each word must be in one script, but different words may use different scripts. A bilingual name such as
+    ``Noor Salon`` followed by its Arabic form is accepted; a Latin word with one Cyrillic letter in it, which
+    looks like another business's name, is refused.
+
+    Args:
+        value: The name as typed.
+        field: The field name used in the log and the error.
+
+    Returns:
+        The cleaned name, 1 to 120 characters.
+
+    Raises:
+        TextRefusedError: If the name breaks a rule of :func:`clean_name`, or a word mixes scripts.
+    """
+    text = clean_name(value, field, 120)
+    if any(len(scripts(word)) > 1 for word in text.split()):
+        raise _refuse(field, "mixed_scripts_in_a_word")
     return text
 
 
@@ -340,6 +417,28 @@ CustomerNote = Annotated[str, AfterValidator(clean_note)]
 
 CustomerPhone = Annotated[str, StringConstraints(pattern=PHONE_PATTERN)]
 """A customer's phone number."""
+
+OwnerBusinessName = Annotated[str, AfterValidator(clean_business_name)]
+"""A business name as an owner enters it: normalised, 1 to 120 characters, no hidden characters, one script per
+word."""
+
+OwnerName = Annotated[str, AfterValidator(partial(clean_name, field="owner_name", max_length=100))]
+"""An owner's name as entered: as a customer's name."""
+
+OwnerBusinessType = Annotated[str, AfterValidator(partial(clean_name, field="business_type_other", max_length=60))]
+"""The description of a business whose type is ``other``: as a person's name, up to 60 characters."""
+
+OwnerServiceName = Annotated[str, AfterValidator(partial(clean_name, field="service_name", max_length=120))]
+"""A service name as an owner enters it: as a person's name, up to 120 characters."""
+
+OwnerAddress = Annotated[str, AfterValidator(partial(clean_name, field="public_address", max_length=200, min_length=3))]
+"""A public address as an owner enters it: as a person's name, 3 to 200 characters, on one line."""
+
+OwnerEmail = Annotated[str, AfterValidator(partial(clean_email, field="owner_email"))]
+"""An email address an owner enters: as a customer's email address."""
+
+TimeOffNote = Annotated[str, AfterValidator(partial(clean_note, field="time_off_note", max_length=100))]
+"""A private note on days off: as a customer's note, up to 100 characters."""
 
 
 def from_row(record: type[RecordT], row: Sequence[Any]) -> RecordT:

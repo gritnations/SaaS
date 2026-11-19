@@ -17,20 +17,21 @@ Responses carry customer details, so the ingress boundary's ``Cache-Control: no-
 
 from collections.abc import Callable
 from datetime import date, datetime, time
-from typing import Annotated, Protocol, TypeVar
+from functools import partial
+from typing import Annotated, Any, Literal, Protocol, TypeVar
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from api.auth import TokenError, TokenVerifier
-from api.booking import EMAIL_PATTERN, PHONE_PATTERN, Slug
+from api.booking import PHONE_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
 from booking.billing import BillingBackend
 from booking.owner import (
-    BUSINESS_TYPES,
+    BUSINESS_TYPE_PATTERN,
+    CLEARABLE_SETTINGS,
     MAX_DAYS_PER_REQUEST,
-    REGIONS,
-    SIGNUP_PLANS,
+    REGION_PATTERN,
     ConflictError,
     HoursBlock,
     InvalidChangeError,
@@ -40,12 +41,21 @@ from booking.owner import (
     OwnerServiceRecord,
     ServiceChanges,
     Settings,
+    SettingsChanges,
     TimeOff,
 )
 from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
 from booking.refunds import RefundUnavailableError
 from booking.service import Business, NotFoundError
-from contracts import SERVICE_SLUG_PATTERN
+from contracts import (
+    SERVICE_SLUG_PATTERN,
+    OwnerBusinessName,
+    OwnerName,
+    OwnerServiceName,
+    clean_email,
+    clean_name,
+    clean_note,
+)
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
 
@@ -234,7 +244,7 @@ class OwnerBackend(Protocol):
         """
         ...
 
-    def update_settings(self, account: str, slug: str, changes: dict[str, object]) -> Settings:
+    def update_settings(self, account: str, slug: str, changes: SettingsChanges) -> Settings:
         """See :meth:`booking.owner.OwnerService.update_settings`.
 
         Args:
@@ -253,7 +263,6 @@ T = TypeVar("T")
 ServiceSlug = Annotated[str, Path(pattern=SERVICE_SLUG_PATTERN)]
 """A service slug as it appears in a request path."""
 
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 Duration = Annotated[int, Field(ge=5, le=480)]
 Price = Annotated[int, Field(ge=0, le=10_000_000)]
 SortOrder = Annotated[int, Field(ge=0, le=10_000)]
@@ -303,13 +312,13 @@ class NewBusinessBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: Annotated[str, StringConstraints(min_length=1, max_length=120)]
-    business_type: Annotated[str, StringConstraints(pattern="^(" + "|".join(BUSINESS_TYPES) + ")$")]
+    name: OwnerBusinessName
+    business_type: Annotated[str, StringConstraints(pattern=BUSINESS_TYPE_PATTERN)]
     business_type_other: Annotated[str, StringConstraints(max_length=60)] | None = None
-    owner_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
-    plan: Annotated[str, StringConstraints(pattern="^(" + "|".join(SIGNUP_PLANS) + ")$")] = "free"
+    owner_name: OwnerName
+    plan: Literal["free"] = "free"
     contact_email: Annotated[str, StringConstraints(max_length=254)] | None = None
-    region: Annotated[str, StringConstraints(pattern="^(" + "|".join(REGIONS) + ")$")] = "uk"
+    region: Annotated[str, StringConstraints(pattern=REGION_PATTERN)] = "uk"
 
     @field_validator("business_type_other", "contact_email")
     @classmethod
@@ -324,23 +333,37 @@ class NewBusinessBody(BaseModel):
         """
         return value or None
 
+    @field_validator("business_type_other")
+    @classmethod
+    def check_other(cls, value: str | None) -> str | None:
+        """Apply the name rule to a given description.
+
+        Args:
+            value: The submitted description, blank already made ``None``.
+
+        Returns:
+            The cleaned description, or ``None``.
+
+        Raises:
+            TextRefusedError: If it breaks the name rule.
+        """
+        return None if value is None else clean_name(value, "business_type_other", 60)
+
     @field_validator("contact_email")
     @classmethod
     def check_email(cls, value: str | None) -> str | None:
-        """Accept a plausible address or nothing.
+        """Apply the email rule to a given address.
 
         Args:
-            value: The submitted address.
+            value: The submitted address, blank already made ``None``.
 
         Returns:
-            The address, or ``None``.
+            The normalised address, or ``None``.
 
         Raises:
-            ValueError: If it is not a plausible address.
+            TextRefusedError: If it breaks the email rule.
         """
-        if value is not None and not EMAIL_PATTERN.match(value):
-            raise ValueError("not an email address")
-        return value
+        return None if value is None else clean_email(value, "owner_email")
 
 
 class MeOut(BaseModel):
@@ -440,7 +463,7 @@ class ServiceCreateBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     slug: Annotated[str, StringConstraints(pattern=SERVICE_SLUG_PATTERN)]
-    name: Name
+    name: OwnerServiceName
     duration_minutes: Duration
     price_minor: Price = 0
     active: bool = True
@@ -460,7 +483,7 @@ class ServiceUpdateBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Name | None = None
+    name: OwnerServiceName | None = None
     duration_minutes: Duration | None = None
     price_minor: Price | None = None
     active: bool | None = None
@@ -536,7 +559,14 @@ class TimeOffBody(BaseModel):
 
     first_day: date
     last_day: date | None = None
-    note: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+    note: (
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, max_length=100),
+            AfterValidator(partial(clean_note, field="time_off_note", max_length=100)),
+        ]
+        | None
+    ) = None
 
     @model_validator(mode="after")
     def check_range(self) -> "TimeOffBody":
@@ -642,7 +672,7 @@ class SettingsBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: Name | None = None
+    name: OwnerBusinessName | None = None
     break_minutes: Annotated[int, Field(ge=0, le=240)] | None = None
     notice_minutes: Annotated[int, Field(ge=0, le=43200)] | None = None
     window_days: Annotated[int, Field(ge=1, le=365)] | None = None
@@ -666,11 +696,9 @@ class SettingsBody(BaseModel):
             The address, or an empty string.
 
         Raises:
-            ValueError: If it is too short.
+            TextRefusedError: If it breaks the name rule or is shorter than 3 characters once cleaned.
         """
-        if value and len(value) < 3:
-            raise ValueError("address too short")
-        return value
+        return clean_name(value, "public_address", 200, 3) if value else value
 
     @field_validator("public_phone")
     @classmethod
@@ -699,14 +727,12 @@ class SettingsBody(BaseModel):
             value: The submitted address.
 
         Returns:
-            The address, or an empty string.
+            The normalised address, or an empty string.
 
         Raises:
-            ValueError: If it is neither.
+            TextRefusedError: If it breaks the email rule.
         """
-        if value and not EMAIL_PATTERN.match(value):
-            raise ValueError("not an email address")
-        return value
+        return clean_email(value, "owner_email") if value else value
 
     @field_validator("meeting_link")
     @classmethod
@@ -726,20 +752,20 @@ class SettingsBody(BaseModel):
             raise ValueError("not an https link")
         return value
 
-    def changes(self) -> dict[str, object]:
+    def changes(self) -> SettingsChanges:
         """List the fields to change. A sent-but-empty optional text field means clear.
 
         Returns:
-            Field name to new value.
+            The changes.
         """
         sent = self.model_dump(exclude_unset=True)
-        out: dict[str, object] = {}
+        out: dict[str, Any] = {}
         for name, value in sent.items():
-            if name in ("contact_email", "meeting_link", "public_address", "public_phone", "public_email"):
+            if name in CLEARABLE_SETTINGS:
                 out[name] = value or None
             elif value is not None:
                 out[name] = value
-        return out
+        return SettingsChanges(**out)
 
 
 def _clock(value: time) -> str:
@@ -1101,13 +1127,13 @@ def build_router(
             The new membership, on the free plan with its trial.
         """
         new = NewBusiness(
-            body.name,
-            body.business_type,
-            body.business_type_other,
-            body.owner_name,
-            body.plan,
-            body.contact_email,
-            body.region,
+            name=body.name,
+            business_type=body.business_type,
+            business_type_other=body.business_type_other,
+            owner_name=body.owner_name,
+            plan=body.plan,
+            contact_email=body.contact_email,
+            region=body.region,
         )
         return _membership_out(answer(lambda: service().create_business(who, new)))
 

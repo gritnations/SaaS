@@ -190,7 +190,12 @@ def sign_up(world: World) -> tuple[str, str, str]:
     account = str(uuid.uuid4())
     made = world.owners.create_business(
         account,
-        NewBusiness(f"Plantest {secrets.token_hex(3)}", "salon", None, "Sample Owner", "free", "owner@example.com"),
+        NewBusiness(
+            name=f"Plantest {secrets.token_hex(3)}",
+            business_type="salon",
+            owner_name="Sample Owner",
+            contact_email="owner@example.com",
+        ),
     )
     with world.database.connection() as connection:
         row = connection.execute("SELECT id::text FROM businesses WHERE slug = %s", (made.slug,)).fetchone()
@@ -215,7 +220,11 @@ def test_a_plan_is_billed_in_pounds_for_a_business_outside_the_uk(world: World) 
     made = world.owners.create_business(
         account,
         NewBusiness(
-            f"Plantest {secrets.token_hex(3)}", "salon", None, "Sample Owner", "free", "owner@example.com", "sa"
+            name=f"Plantest {secrets.token_hex(3)}",
+            business_type="salon",
+            owner_name="Sample Owner",
+            contact_email="owner@example.com",
+            region="sa",
         ),
     )
     world.billing.upgrade(account, made.slug, "starter")
