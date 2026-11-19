@@ -6,7 +6,6 @@ database. Database behaviour, including the overlap constraint, is covered by
 ``test_booking_postgres.py``.
 """
 
-from dataclasses import replace
 from datetime import date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -33,8 +32,17 @@ from main import create_app
 from postgres import DatabaseUnavailableError
 
 LONDON = ZoneInfo("Europe/London")
-BUSINESS = Business("internal-business-id", "example", "Example Advisory", "Europe/London", "GBP", 0, 240, 30)
-INTRO = Service("internal-service-id", "intro", "Introductory call", 30, 0)
+BUSINESS = Business(
+    id="internal-business-id",
+    slug="example",
+    name="Example Advisory",
+    time_zone="Europe/London",
+    currency="GBP",
+    break_minutes=0,
+    notice_minutes=240,
+    window_days=30,
+)
+INTRO = Service(id="internal-service-id", slug="intro", name="Introductory call", duration_minutes=30, price_minor=0)
 SLOT = Slot(
     "09:00",
     "9:00 – 9:30 AM",
@@ -161,8 +169,12 @@ def test_services_lists_public_fields_only() -> None:
 
 def test_services_show_public_contact_details() -> None:
     """The business's public address, phone and email reach customers when set."""
-    business = replace(
-        BUSINESS, public_address="1 High Street, London", public_phone="020 7946 0000", public_email="hello@example.com"
+    business = BUSINESS.model_copy(
+        update={
+            "public_address": "1 High Street, London",
+            "public_phone": "020 7946 0000",
+            "public_email": "hello@example.com",
+        }
     )
     response = client_for(FakeBookings(business=business)).get("/businesses/example/services")
     assert response.status_code == 200

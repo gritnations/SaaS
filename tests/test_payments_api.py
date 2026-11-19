@@ -26,7 +26,7 @@ from payments.stripe import StripeConfigError
 from postgres import DatabaseUnavailableError
 
 STRIPE_ENV = {"STRIPE_SECRET_KEY": "sk_test_placeholder", "STRIPE_WEBHOOK_SECRET": SECRET}
-SERVICE = Service("internal", "cut", "Haircut", 30, 2500)
+SERVICE = Service(id="internal", slug="cut", name="Haircut", duration_minutes=30, price_minor=2500)
 SLOT = Slot(
     "10:00",
     "10:00 to 10:30",
