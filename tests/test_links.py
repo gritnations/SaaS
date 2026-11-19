@@ -11,22 +11,22 @@ TOKEN = "ab" * 24
 
 def test_product_pages_layout() -> None:
     """With product pages, booking and manage links use their own paths; the code stays after ``#``."""
-    links = CustomerLinks("https://book.example.com", pages=True)
+    links = CustomerLinks(base="https://book.example.com", pages=True)
     assert links.booking("fade") == "https://book.example.com/book/fade"
     assert links.manage("fade", "ZA2JBN2C5B", TOKEN) == f"https://book.example.com/manage/#fade.ZA2JBN2C5B.{TOKEN}"
 
 
 def test_staging_layout_is_unchanged() -> None:
     """Without product pages, links keep the staging page layout that emails already use."""
-    links = CustomerLinks("https://book.example.com")
+    links = CustomerLinks(base="https://book.example.com")
     assert links.booking("fade") == "https://book.example.com/?b=fade"
     assert links.manage("fade", "ZA2JBN2C5B", TOKEN) == f"https://book.example.com/#manage=fade.ZA2JBN2C5B.{TOKEN}"
 
 
 def test_plain_site_url_means_staging_layout() -> None:
     """A plain site URL becomes staging links; links and ``None`` pass through."""
-    assert as_links("https://book.example.com") == CustomerLinks("https://book.example.com")
-    ready = CustomerLinks("https://book.example.com", pages=True)
+    assert as_links("https://book.example.com") == CustomerLinks(base="https://book.example.com")
+    ready = CustomerLinks(base="https://book.example.com", pages=True)
     assert as_links(ready) is ready
     assert as_links(None) is None
 

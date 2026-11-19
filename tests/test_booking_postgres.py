@@ -99,7 +99,15 @@ def request(world: World, service: str, start: str) -> BookingRequest:
     Returns:
         The request.
     """
-    return BookingRequest(service, world.day, start, "Test Customer", "customer@example.com", None, None)
+    return BookingRequest(
+        service=service,
+        date=world.day,
+        time=start,
+        name="Test Customer",
+        email="customer@example.com",
+        phone=None,
+        note=None,
+    )
 
 
 def test_racing_requests_for_one_session_produce_exactly_one_booking(world: World) -> None:
@@ -174,7 +182,10 @@ def test_dates_outside_the_booking_window_are_refused(world: World) -> None:
     for day in (datetime.now(UTC).date() - timedelta(days=1), datetime.now(UTC).date() + timedelta(days=60)):
         with pytest.raises(InvalidSlotError):
             world.service.create_booking(
-                world.slug, BookingRequest("hour", day, "10:30", "Test", "t@example.com", None, None)
+                world.slug,
+                BookingRequest(
+                    service="hour", date=day, time="10:30", name="Test", email="t@example.com", phone=None, note=None
+                ),
             )
 
 

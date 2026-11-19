@@ -17,7 +17,6 @@ import secrets
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
 
@@ -114,7 +113,14 @@ class World:
             The request.
         """
         return BookingRequest(
-            "hour", self.day, time, "Pat Customer", "pat@example.com", None, None, idempotency_key=key
+            service="hour",
+            date=self.day,
+            time=time,
+            name="Pat Customer",
+            email="pat@example.com",
+            phone=None,
+            note=None,
+            idempotency_key=key,
         )
 
     def count(self) -> int:
@@ -256,9 +262,15 @@ def test_simultaneous_repeats_of_one_request_make_exactly_one_booking() -> None:
             )
     service = BookingService(database)
     request = BookingRequest(
-        "hour", datetime.now(UTC).date() + timedelta(days=3), "10:00", "Pat", "pat@example.com", None, None,
+        service="hour",
+        date=datetime.now(UTC).date() + timedelta(days=3),
+        time="10:00",
+        name="Pat",
+        email="pat@example.com",
+        phone=None,
+        note=None,
         idempotency_key="key-race-abcdefgh",
-    )  # fmt: skip
+    )
     barrier = threading.Barrier(6)
     outcomes: list[object] = [None] * 6
 
@@ -270,7 +282,7 @@ def test_simultaneous_repeats_of_one_request_make_exactly_one_booking() -> None:
         """
         barrier.wait()
         try:
-            outcomes[index] = service.create_booking(slug, replace(request))
+            outcomes[index] = service.create_booking(slug, request.model_copy())
         except Exception as exc:  # noqa: BLE001 - the outcome is the point of the test
             outcomes[index] = exc
 

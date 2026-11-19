@@ -23,13 +23,14 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from booking.links import CustomerLinks, as_links
+from contracts import SITE_URL_PATTERN
 from mail import Attachment, Mailer, MailError, Message
 from postgres import Database, DatabaseUnavailableError
 
 LOGGER = logging.getLogger(__name__)
 
 SITE_URL_ENV = "PUBLIC_SITE_URL"
-_SITE_PATTERN = re.compile(r"^(https://[a-z0-9.-]+|http://(localhost|127\.0\.0\.1)(:\d{1,5})?)(/[A-Za-z0-9._~/-]*)?$")
+_SITE_PATTERN = re.compile(SITE_URL_PATTERN)
 KINDS = ("confirmed", "cancelled", "moved")
 
 

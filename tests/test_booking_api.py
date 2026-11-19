@@ -120,7 +120,7 @@ class FakeBookings:
         """
         self.received.append(request)
         self._check()
-        return Confirmation("ABCDEFGH23", INTRO, SLOT)
+        return Confirmation(reference="ABCDEFGH23", service=INTRO, slot=SLOT)
 
 
 def client_for(bookings: FakeBookings | None) -> TestClient:
@@ -245,6 +245,55 @@ def test_booking_rejects_malformed_or_extra_fields(change: dict[str, Any]) -> No
     assert bookings.received == []
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "Sample\u202eCustomer"},
+        {"name": "Sample\x00Customer"},
+        {"name": "\u200b"},
+        {"email": "customer@\u0435xample.com"},
+        {"email": "customer\u200b@example.com"},
+        {"note": "Hello\u202e"},
+    ],
+)
+def test_booking_refuses_hidden_or_look_alike_characters(change: dict[str, Any]) -> None:
+    """A name, email or note with direction or invisible characters, or an email mixing scripts, is a 422."""
+    bookings = FakeBookings()
+    response = client_for(bookings).post("/businesses/example/bookings", json={**VALID, **change})
+    assert response.status_code == 422
+    assert bookings.received == []
+
+
+def test_booking_normalises_the_name_and_email_before_the_service_sees_them() -> None:
+    """Full-width letters and zero-width characters do not reach the service; a note keeps its emoji."""
+    bookings = FakeBookings()
+    response = client_for(bookings).post(
+        "/businesses/example/bookings",
+        json={
+            **VALID,
+            "name": "\uff33ample\u200b Customer",
+            "email": "\uff43ustomer@example.com",
+            "note": "Thanks \U0001f44d",
+        },
+    )
+    assert response.status_code == 201
+    [request] = bookings.received
+    assert (request.name, request.email, request.note) == (
+        "Sample Customer",
+        "customer@example.com",
+        "Thanks \U0001f44d",
+    )
+
+
+def test_a_two_character_business_slug_is_refused_as_the_database_would() -> None:
+    """Business web names are 3 to 40 characters, as in the database; a 2-character service name is still fine."""
+    client = client_for(FakeBookings())
+    assert client.get("/businesses/ab/services").status_code == 422
+    assert client.get("/businesses/abc/services").status_code == 200
+    response = client.post("/businesses/example/bookings", json={**VALID, "service": "ab"})
+    assert response.status_code == 201
+
+
 def test_validation_errors_do_not_echo_submitted_values() -> None:
     """A rejected email is named as a field, but its value is not repeated back."""
     response = client_for(FakeBookings()).post(
@@ -330,7 +379,7 @@ class ReplayingBookings(FakeBookings):
             A confirmation marked as replayed, without a manage code.
         """
         self.received.append(request)
-        return Confirmation("ABCDEFGH23", INTRO, SLOT, replayed=True)
+        return Confirmation(reference="ABCDEFGH23", service=INTRO, slot=SLOT, replayed=True)
 
 
 def test_a_repeat_answers_200_with_the_same_booking_and_no_code() -> None:

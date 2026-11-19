@@ -82,7 +82,14 @@ class FakeBookings:
         Returns:
             The hold.
         """
-        return Confirmation("ABCDEFGH23", SERVICE, SLOT, None, "pending_payment", "https://checkout.stripe.com/c/x")
+        return Confirmation(
+            reference="ABCDEFGH23",
+            service=SERVICE,
+            slot=SLOT,
+            manage_token=None,
+            status="pending_payment",
+            checkout_url="https://checkout.stripe.com/c/x",
+        )
 
 
 class FakePayments:

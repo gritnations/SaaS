@@ -90,7 +90,10 @@ def pair() -> Iterator[Pair]:
     bookings = BookingService(database)
     day = datetime.now(UTC).date() + timedelta(days=3)
     confirmed = bookings.create_booking(
-        slugs[1], BookingRequest("hour", day, "10:00", "B Customer", "b@example.com", None, None)
+        slugs[1],
+        BookingRequest(
+            service="hour", date=day, time="10:00", name="B Customer", email="b@example.com", phone=None, note=None
+        ),
     )
     try:
         yield Pair(OwnerService(database), bookings, slugs[0], slugs[1], accounts[0], accounts[1], confirmed.reference)

@@ -150,7 +150,7 @@ def book(world: World, start: str = "10:00") -> tuple[str, str]:
         ``(reference, manage_token)``.
     """
     confirmed = world.bookings.create_booking(
-        world.slug, BookingRequest("hour", world.day, start, "Pat <b>Customer</b>", "pat@example.com", None, None)  # type: ignore[arg-type]
+        world.slug, BookingRequest(service="hour", date=world.day, time=start, name="Pat <b>Customer</b>", email="pat@example.com", phone=None, note=None)  # type: ignore[arg-type]
     )
     assert confirmed.manage_token is not None
     return confirmed.reference, confirmed.manage_token

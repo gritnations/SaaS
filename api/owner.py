@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from api.auth import TokenError, TokenVerifier
-from api.booking import EMAIL_PATTERN, PHONE_PATTERN, SLUG_PATTERN, Slug
+from api.booking import EMAIL_PATTERN, PHONE_PATTERN, Slug
 from booking.availability import session_label, time_to_minutes
 from booking.billing import BillingBackend
 from booking.owner import (
@@ -44,6 +44,7 @@ from booking.owner import (
 from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
 from booking.refunds import RefundUnavailableError
 from booking.service import Business, NotFoundError
+from contracts import SERVICE_SLUG_PATTERN
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
 
@@ -250,7 +251,7 @@ class OwnerBackend(Protocol):
 
 T = TypeVar("T")
 
-ServiceSlug = Annotated[str, Path(pattern=SLUG_PATTERN)]
+ServiceSlug = Annotated[str, Path(pattern=SERVICE_SLUG_PATTERN)]
 """A service slug as it appears in a request path."""
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
@@ -439,7 +440,7 @@ class ServiceCreateBody(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    slug: Annotated[str, StringConstraints(pattern=SLUG_PATTERN)]
+    slug: Annotated[str, StringConstraints(pattern=SERVICE_SLUG_PATTERN)]
     name: Name
     duration_minutes: Duration
     price_minor: Price = 0

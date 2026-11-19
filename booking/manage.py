@@ -20,6 +20,7 @@ from typing import Any
 
 import psycopg
 from psycopg import errors
+from pydantic import BaseModel, InstanceOf
 
 from booking.availability import Slot, normalize_break, time_to_minutes
 from booking.refunds import refund_paid_booking
@@ -35,6 +36,7 @@ from booking.service import (
     hash_token,
     release_expired_holds,
 )
+from contracts import STRICT, AwareDatetime, BookingStatus, PaymentStatus, Reference
 from payments.base import BookingRefunds
 from postgres import Database
 
@@ -43,8 +45,7 @@ class TooLateError(BookingError):
     """The deadline for this change has passed, or the booking is no longer active."""
 
 
-@dataclass(frozen=True)
-class ManagedBooking:
+class ManagedBooking(BaseModel):
     """A booking as its customer sees it through the manage link.
 
     Attributes:
@@ -61,17 +62,19 @@ class ManagedBooking:
         payment_status: ``not_required``, ``at_venue``, ``paid`` (taken online) or ``refunded``.
     """
 
-    reference: str
-    status: str
-    business: Business
-    service: Service
-    starts_at: datetime
-    ends_at: datetime
+    model_config = STRICT
+
+    reference: Reference
+    status: BookingStatus
+    business: InstanceOf[Business]
+    service: InstanceOf[Service]
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
     can_cancel: bool
     can_move: bool
-    cancel_deadline: datetime
-    move_deadline: datetime
-    payment_status: str = "not_required"
+    cancel_deadline: AwareDatetime
+    move_deadline: AwareDatetime
+    payment_status: PaymentStatus = "not_required"
 
 
 _LOOKUP = (

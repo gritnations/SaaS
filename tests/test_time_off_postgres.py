@@ -147,7 +147,9 @@ def request(day: date, start: str = "10:00") -> BookingRequest:
     Returns:
         The request.
     """
-    return BookingRequest("hour", day, start, "Test Customer", "customer@example.com", None, None)
+    return BookingRequest(
+        service="hour", date=day, time=start, name="Test Customer", email="customer@example.com", phone=None, note=None
+    )
 
 
 def test_a_closed_day_has_no_times_and_its_neighbours_are_unaffected(world: World) -> None:

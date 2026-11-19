@@ -31,7 +31,7 @@ const state = {
  */
 function readLink() {
   const raw = location.hash.replace(/^#(manage=)?/, "");
-  const match = raw.match(/^([a-z0-9][a-z0-9-]{0,38}[a-z0-9])\.([A-Za-z0-9]{10})\.([0-9a-f]{48})$/);
+  const match = raw.match(/^([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\.([A-Za-z0-9]{10})\.([0-9a-f]{48})$/);
   if (!match) return false;
   [, state.slug, state.reference, state.token] = match;
   return true;

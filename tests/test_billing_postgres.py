@@ -298,7 +298,17 @@ def book(world: World, slug: str, start: str, pay: str | None = None) -> tuple[s
     while day.weekday() not in (5, 6):
         day += timedelta(days=1)
     made = world.bookings.create_booking(
-        slug, BookingRequest("cut", day, start, "Test Customer", "customer@example.com", None, None, pay)
+        slug,
+        BookingRequest(
+            service="cut",
+            date=day,
+            time=start,
+            name="Test Customer",
+            email="customer@example.com",
+            phone=None,
+            note=None,
+            pay=pay,
+        ),
     )
     return made.status, made.payment_status
 
