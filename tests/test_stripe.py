@@ -21,7 +21,9 @@ import stripe
 
 from payments.base import (
     AccountPayments,
+    BookingPaymentEvent,
     CheckoutOrder,
+    IgnoredEvent,
     PaymentProvider,
     ProviderNotLiveError,
     ProviderUnavailableError,
@@ -243,6 +245,7 @@ def test_a_paid_checkout_notification_is_read_after_its_signature_verifies() -> 
     """Every field the booking layer checks comes from the verified event."""
     body = event("checkout.session.completed", PAID_SESSION)
     parsed = provider().parse_webhook(sign(body), body)
+    assert isinstance(parsed, BookingPaymentEvent)
     assert (parsed.provider, parsed.status, parsed.live, parsed.order_reference) == (
         "stripe",
         "paid",
@@ -406,8 +409,9 @@ def test_a_payment_refunded_in_full_is_reported_with_its_payment_and_account() -
     """The event names the payment and the business's account, and nothing about a booking."""
     body = charge_event({})
     parsed = provider().parse_webhook(sign(body), body)
+    assert isinstance(parsed, BookingPaymentEvent)
     assert (parsed.status, parsed.payment_id, parsed.account_id) == ("refunded", "pi_test_1", ACCOUNT)
-    assert (parsed.amount_minor, parsed.currency, parsed.order_reference) == (1200, "GBP", "")
+    assert (parsed.amount_minor, parsed.currency, parsed.order_reference) == (1200, "GBP", None)
     assert parsed.event_id == "evt_test_2"
 
 
@@ -431,3 +435,24 @@ def test_a_refund_notification_from_the_platform_account_is_ignored() -> None:
     """A refund event without a business account is not trusted on the business destination's secret."""
     body = charge_event({}, account=None)
     assert provider().parse_webhook(sign(body), body).status == "ignored"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"currency": "pounds"},
+        {"amount_total": -5},
+        {"id": "cs test with spaces"},
+    ],
+)
+def test_a_signed_checkout_notification_that_does_not_fit_the_contract_is_ignored(
+    change: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """It is still accepted (the signature is good), but never reaches the booking layer. Only the field names
+    are logged, never the values."""
+    body = event("checkout.session.completed", {**PAID_SESSION, **change})
+    parsed = provider().parse_webhook(sign(body), body)
+    assert isinstance(parsed, IgnoredEvent)
+    assert "fields do not fit" in caplog.text
+    for value in change.values():
+        assert str(value).upper() not in caplog.text.upper()

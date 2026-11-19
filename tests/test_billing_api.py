@@ -119,7 +119,7 @@ class FakeBilling:
             The quote.
         """
         self._record("cancel_quote", account, slug)
-        return CancellationQuote(450, "GBP", 15)
+        return CancellationQuote(refund_minor=450, currency="GBP", unused_days=15)
 
     def cancel_plan(self, account: str, slug: str) -> CancellationQuote:
         """Answer with what the cancellation refunded.
@@ -132,7 +132,7 @@ class FakeBilling:
             The refund made.
         """
         self._record("cancel_plan", account, slug)
-        return CancellationQuote(450, "GBP", 15)
+        return CancellationQuote(refund_minor=450, currency="GBP", unused_days=15)
 
     def record(self, event: PaymentEvent) -> bool:
         """Record the event.

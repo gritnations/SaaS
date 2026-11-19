@@ -18,7 +18,14 @@ import pytest
 import stripe
 from test_stripe import ACCOUNT, PAID_SESSION, SECRET, event, sign
 
-from payments.base import ProviderUnavailableError, SubscriptionBilling, SubscriptionOrder, WebhookRejectedError
+from payments.base import (
+    IgnoredEvent,
+    ProviderUnavailableError,
+    SubscriptionBilling,
+    SubscriptionEvent,
+    SubscriptionOrder,
+    WebhookRejectedError,
+)
 from payments.stripe import StripeConfigError, StripeProvider, stripe_from_environment
 
 BILLING_SECRET = "whsec_billing_secret"
@@ -292,7 +299,8 @@ def test_subscription_notifications_map_to_one_status(kind: str, item: dict[str,
     parsed = billing_provider().parse_webhook(sign(body, BILLING_SECRET), body)
     assert parsed.status == status
     if status != "ignored":
-        assert (parsed.order_reference, parsed.subscription_id, parsed.customer_id, parsed.plan) == (
+        assert isinstance(parsed, SubscriptionEvent)
+        assert (str(parsed.business_id), parsed.subscription_id, parsed.customer_id, parsed.plan) == (
             BUSINESS,
             "sub_test_1",
             "cus_test_1",
@@ -338,6 +346,29 @@ def test_a_subscription_set_to_cancel_reports_when_it_ends() -> None:
     for item, expected in cases:
         body = platform_event("customer.subscription.updated", item)
         parsed = billing_provider().parse_webhook(sign(body, BILLING_SECRET), body)
+        assert isinstance(parsed, SubscriptionEvent)
         assert (parsed.status, parsed.ends_at, parsed.ends_known) == ("subscription_active", expected, True)
     body = platform_event("checkout.session.completed", SUBSCRIBED)
-    assert billing_provider().parse_webhook(sign(body, BILLING_SECRET), body).ends_known is False
+    started = billing_provider().parse_webhook(sign(body, BILLING_SECRET), body)
+    assert isinstance(started, SubscriptionEvent)
+    assert started.ends_known is False
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"client_reference_id": "not-a-business", "metadata": {"plan": "starter"}},
+        {"client_reference_id": None, "metadata": {"plan": "starter"}},
+        {"subscription": None},
+    ],
+)
+def test_a_subscription_notification_without_a_business_or_subscription_is_ignored(
+    change: dict[str, Any], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A signed notice that cannot name the business and its subscription is accepted, logged and ignored."""
+    body = platform_event("checkout.session.completed", {**SUBSCRIBED, **change})
+    parsed = billing_provider().parse_webhook(sign(body, BILLING_SECRET), body)
+    assert isinstance(parsed, IgnoredEvent)
+    assert (parsed.provider, parsed.status, parsed.live) == ("stripe", "ignored", False)
+    assert "without a business" in caplog.text or "fields do not fit" in caplog.text
+    assert "not-a-business" not in caplog.text

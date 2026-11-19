@@ -58,9 +58,11 @@ from booking.service import BookingBackend, BookingService
 from mail import mailer_from_environment, sender_domain
 from payments.base import (
     ORDER_REFERENCE_PATTERN,
+    BookingPaymentEvent,
     PaymentProvider,
     PaymentRegistry,
     ProviderNotLiveError,
+    SubscriptionEvent,
     UnknownProviderError,
     WebhookRejectedError,
 )
@@ -488,12 +490,13 @@ def create_api(
             raise HTTPException(status_code=400, detail="Webhook rejected.") from None
         recorded = False
         is_stripe = stripe_provider is not None and event.provider == stripe_provider.name
-        recorder = billing if event.status.startswith("subscription_") else payments
-        if is_stripe and recorder is not None:
-            try:
-                recorded = recorder.record(event)
-            except DatabaseUnavailableError:
-                raise HTTPException(status_code=503, detail="Try again later.") from None
+        try:
+            if is_stripe and isinstance(event, SubscriptionEvent) and billing is not None:
+                recorded = billing.record(event)
+            elif is_stripe and isinstance(event, BookingPaymentEvent) and payments is not None:
+                recorded = payments.record(event)
+        except DatabaseUnavailableError:
+            raise HTTPException(status_code=503, detail="Try again later.") from None
         LOGGER.info(
             "payment notification accepted provider=%s live=%s status=%s recorded=%s",
             event.provider,

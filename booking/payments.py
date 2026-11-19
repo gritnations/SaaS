@@ -38,7 +38,7 @@ from booking.service import (
     hash_token,
     online_payments_allowed,
 )
-from payments.base import AccountPayments, PaymentEvent, ProviderUnavailableError
+from payments.base import AccountPayments, BookingPaymentEvent, ProviderUnavailableError
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -162,7 +162,7 @@ class PaymentsBackend(Protocol):
         """
         ...
 
-    def record(self, event: PaymentEvent) -> bool:
+    def record(self, event: BookingPaymentEvent) -> bool:
         """See :meth:`PaymentService.record`.
 
         Args:
@@ -351,7 +351,7 @@ class PaymentService:
         )
 
     @staticmethod
-    def _first_delivery(connection: psycopg.Connection[Any], event: PaymentEvent) -> bool:
+    def _first_delivery(connection: psycopg.Connection[Any], event: BookingPaymentEvent) -> bool:
         """Record that the provider's event is being applied, unless it was applied before.
 
         Call this inside a savepoint, in the same transaction as the booking change, and roll the savepoint back
@@ -377,7 +377,7 @@ class PaymentService:
             return False
         return True
 
-    def _record_refund(self, event: PaymentEvent) -> bool:
+    def _record_refund(self, event: BookingPaymentEvent) -> bool:
         """Mark a booking refunded when its payment was refunded in full outside the product.
 
         The booking's own status is not touched: a refunded payment does not cancel the appointment. A booking
@@ -410,7 +410,7 @@ class PaymentService:
             LOGGER.info("booking payment refunded in full outside the product provider=%s", event.provider)
         return result.rowcount == 1
 
-    def record(self, event: PaymentEvent) -> bool:
+    def record(self, event: BookingPaymentEvent) -> bool:
         """Apply a verified payment event to its booking.
 
         Args:
@@ -426,7 +426,7 @@ class PaymentService:
         """
         if event.status == "refunded":
             return self._record_refund(event)
-        if event.status not in ("paid", "expired", "failed") or not event.checkout_id:
+        if not event.checkout_id:
             return False
         token: str | None = None
         with self._database.connection() as connection:

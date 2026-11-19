@@ -329,3 +329,13 @@ def test_payment_option_outcomes_map_to_answers(failure: Exception, status: int)
         "/owner/businesses/fade/payments", headers=GOOD, json={"pay_online": True}
     )
     assert response.status_code == status
+
+
+def test_a_notification_that_needs_no_action_never_reaches_the_payment_service() -> None:
+    """A verified but ignored notification is still accepted, and nothing is asked of the booking layer."""
+    payments = FakePayments()
+    body = event("checkout.session.completed", {**PAID_SESSION, "payment_status": "unpaid"})
+    response = client(payments).post("/payments/stripe/webhook", content=body, headers=sign(body))
+    assert response.status_code == 202
+    assert response.json() == {"accepted": True, "provider": "stripe", "live": False, "recorded": False}
+    assert payments.calls == []

@@ -24,21 +24,26 @@ never leave the server. Only test-mode keys are accepted until live payments are
 """
 
 import logging
+import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
 import stripe
+from pydantic import ValidationError
 
 from payments.base import (
+    BookingPaymentEvent,
     CancellationQuote,
     CheckoutOrder,
     CheckoutSession,
     HostedCheckout,
+    IgnoredEvent,
     PaymentEvent,
     ProviderNotLiveError,
     ProviderUnavailableError,
+    SubscriptionEvent,
     SubscriptionOrder,
     WebhookRejectedError,
 )
@@ -257,7 +262,7 @@ class StripeProvider:
         invoice = getattr(subscription, "latest_invoice", None)
         currency = (_text(getattr(invoice, "currency", None)) or "gbp").upper()
         if getattr(subscription, "status", None) == "canceled":
-            return _LastPayment(True, CancellationQuote(0, currency, 0), None)
+            return _LastPayment(True, CancellationQuote(refund_minor=0, currency=currency, unused_days=0), None)
         paid = getattr(invoice, "amount_paid", 0) if getattr(invoice, "status", None) == "paid" else 0
         paid = paid if isinstance(paid, int) and paid > 0 else 0
         periods = getattr(getattr(subscription, "items", None), "data", None) or [None]
@@ -270,7 +275,7 @@ class StripeProvider:
             length = remaining = refund = 0
         return _LastPayment(
             False,
-            CancellationQuote(refund, currency, remaining // 86400),
+            CancellationQuote(refund_minor=refund, currency=currency, unused_days=remaining // 86400),
             self._refund_target(invoice) if refund > 0 else None,
         )
 
@@ -359,7 +364,11 @@ class StripeProvider:
             listing = self._client.v1.refunds.list(cast(Any, {**target, "limit": 20}))
             for existing in listing.data:
                 if getattr(existing.metadata, "plan_cancel", None) == subscription_id:
-                    return CancellationQuote(int(existing.amount), last.quote.currency, last.quote.unused_days)
+                    return CancellationQuote(
+                        refund_minor=int(existing.amount),
+                        currency=last.quote.currency,
+                        unused_days=last.quote.unused_days,
+                    )
             refund: Any = {**target, "amount": last.quote.refund_minor, "metadata": {"plan_cancel": subscription_id}}
             self._client.v1.refunds.create(refund, {"idempotency_key": f"plan-cancel-{subscription_id}"})
         except stripe.StripeError as exc:
@@ -550,7 +559,8 @@ class StripeProvider:
             body: The raw request body, exactly as received.
 
         Returns:
-            The event. Notifications that need no action are returned with status ``"ignored"``.
+            The event. Notifications that need no action, or that lack what their outcome needs, are returned as
+            :class:`payments.base.IgnoredEvent`.
 
         Raises:
             WebhookRejectedError: If the signature is missing, wrong or too old, or the body is malformed.
@@ -572,18 +582,20 @@ class StripeProvider:
         account_id = _text(getattr(event, "account", None))
         if (account_id is not None) != from_businesses:
             # Each destination's secret is trusted only for its own kind of notification.
-            return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
+            return IgnoredEvent(provider="stripe", live=live)
         if not from_businesses:
             return self._subscription_event(event, live)
         if event.type == "charge.refunded":
             return self._refund_event(event, live, account_id)
         if event.type not in (*_PAID_EVENTS, "checkout.session.async_payment_failed", "checkout.session.expired"):
-            return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
+            return IgnoredEvent(provider="stripe", live=live)
         data = event.data.object
         session: dict[str, Any] = data.to_dict() if hasattr(data, "to_dict") else {}
-        reference = _text(session.get("client_reference_id")) or ""
+        reference = _text(session.get("client_reference_id"))
         if event.type in _PAID_EVENTS:
-            status = "paid" if session.get("payment_status") == "paid" else "ignored"
+            if session.get("payment_status") != "paid":
+                return IgnoredEvent(provider="stripe", live=live)
+            status = "paid"
         elif event.type == "checkout.session.expired":
             status = "expired"
         else:
@@ -591,11 +603,11 @@ class StripeProvider:
         amount = session.get("amount_total")
         currency = _text(session.get("currency"))
         payment = session.get("payment_intent")
-        return PaymentEvent(
-            provider=self.name,
+        return self._checked(
+            BookingPaymentEvent,
+            live,
             order_reference=reference,
             status=status,
-            live=live,
             checkout_id=_text(session.get("id")),
             account_id=account_id,
             amount_minor=amount if isinstance(amount, int) else None,
@@ -615,7 +627,7 @@ class StripeProvider:
             account_id: The business's payment account it came from.
 
         Returns:
-            The event, or one with status ``"ignored"`` when the payment is not fully refunded.
+            The event, or an ignored one when the payment is not fully refunded.
         """
         data = event.data.object
         charge: dict[str, Any] = data.to_dict() if hasattr(data, "to_dict") else {}
@@ -623,13 +635,12 @@ class StripeProvider:
         payment = _text(charge.get("payment_intent"))
         full = charge.get("refunded") is True and isinstance(amount, int) and amount > 0 and refunded == amount
         if not full or payment is None:
-            return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
+            return IgnoredEvent(provider="stripe", live=live)
         currency = _text(charge.get("currency"))
-        return PaymentEvent(
-            provider=self.name,
-            order_reference="",
+        return self._checked(
+            BookingPaymentEvent,
+            live,
             status="refunded",
-            live=live,
             account_id=account_id,
             amount_minor=amount,
             currency=currency.upper() if currency else None,
@@ -645,36 +656,44 @@ class StripeProvider:
             live: Whether it describes real money.
 
         Returns:
-            The event, or one with status ``"ignored"`` when it needs no action.
+            The event, or an ignored one when it needs no action or does not name a business and a
+            subscription.
         """
         data = event.data.object
         item: dict[str, Any] = data.to_dict() if hasattr(data, "to_dict") else {}
         raw_marks = item.get("metadata")
         marks: dict[str, Any] = raw_marks if isinstance(raw_marks, dict) else {}
-        status = "ignored"
+        status: str | None = None
         ends_at: datetime | None = None
         ends_known = False
         if event.type == "checkout.session.completed" and item.get("mode") == "subscription":
             if item.get("payment_status") in ("paid", "no_payment_required"):
                 status = "subscription_active"
             subscription, customer = item.get("subscription"), item.get("customer")
-            reference = _text(item.get("client_reference_id")) or _text(marks.get("business_id")) or ""
+            reference = _text(item.get("client_reference_id")) or _text(marks.get("business_id"))
         elif event.type in ("customer.subscription.created", "customer.subscription.updated"):
-            status = _SUBSCRIPTION_STATUS.get(str(item.get("status")), "ignored")
+            status = _SUBSCRIPTION_STATUS.get(str(item.get("status")))
             subscription, customer = item.get("id"), item.get("customer")
-            reference = _text(marks.get("business_id")) or ""
+            reference = _text(marks.get("business_id"))
             ends_at, ends_known = self._subscription_end(item), True
         elif event.type == "customer.subscription.deleted":
             status = "subscription_ended"
             subscription, customer = item.get("id"), item.get("customer")
-            reference = _text(marks.get("business_id")) or ""
+            reference = _text(marks.get("business_id"))
         else:
-            return PaymentEvent(provider=self.name, order_reference="", status="ignored", live=live)
-        return PaymentEvent(
-            provider=self.name,
-            order_reference=reference,
+            return IgnoredEvent(provider="stripe", live=live)
+        if status is None:
+            return IgnoredEvent(provider="stripe", live=live)
+        try:
+            business_id = uuid.UUID(reference or "")
+        except ValueError:
+            LOGGER.warning("subscription event without a business provider=%s", self.name)
+            return IgnoredEvent(provider="stripe", live=live)
+        return self._checked(
+            SubscriptionEvent,
+            live,
             status=status,
-            live=live,
+            business_id=business_id,
             subscription_id=_text(subscription)
             or (_text(subscription.get("id")) if isinstance(subscription, dict) else None),
             customer_id=_text(customer) or (_text(customer.get("id")) if isinstance(customer, dict) else None),
@@ -682,6 +701,29 @@ class StripeProvider:
             ends_at=ends_at,
             ends_known=ends_known,
         )
+
+    def _checked(
+        self, kind: type[BookingPaymentEvent] | type[SubscriptionEvent], live: bool, **fields: Any
+    ) -> PaymentEvent:
+        """Build a verified event, or an ignored one when the notification lacks or misshapes a field it needs.
+
+        The notification's signature has already been verified, so it is still answered as accepted. Only the
+        names of the fields that did not fit are logged, never their values.
+
+        Args:
+            kind: The record to build.
+            live: Whether the event describes real money.
+            **fields: The values read from the notification.
+
+        Returns:
+            The event, or an ignored one.
+        """
+        try:
+            return kind(provider="stripe", live=live, **fields)
+        except ValidationError as exc:
+            names = sorted({str(error["loc"][0]) for error in exc.errors() if error["loc"]})
+            LOGGER.warning("stripe notification ignored: fields do not fit kind=%s fields=%s", kind.__name__, names)
+            return IgnoredEvent(provider="stripe", live=live)
 
     @staticmethod
     def _subscription_end(item: dict[str, Any]) -> datetime | None:
