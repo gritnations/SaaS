@@ -18,7 +18,7 @@ from datetime import UTC, datetime, time, timedelta
 
 import pytest
 
-from booking.owner import ConflictError, HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges
+from booking.owner import ConflictError, HoursBlock, OwnerService, OwnerServiceRecord, ServiceChanges, SettingsChanges
 from booking.service import BookingRequest, BookingService, NotFoundError
 from postgres import Database, DatabaseSettings
 
@@ -123,7 +123,7 @@ def test_an_owner_cannot_reach_another_business(pair: Pair) -> None:
         lambda: pair.owners.hours(owner, other),
         lambda: pair.owners.replace_hours(owner, other, []),
         lambda: pair.owners.settings(owner, other),
-        lambda: pair.owners.update_settings(owner, other, {"window_days": 2}),
+        lambda: pair.owners.update_settings(owner, other, SettingsChanges(window_days=2)),
         lambda: pair.owners.create_service(
             owner,
             other,
@@ -166,11 +166,9 @@ def test_contact_details_saved_by_an_owner_reach_customers_in_the_same_fields(pa
     pair.owners.update_settings(
         pair.owner_a,
         pair.a,
-        {
-            "public_address": "1 High Street, London",
-            "public_phone": "020 7946 0000",
-            "public_email": "hello@example.com",
-        },
+        SettingsChanges(
+            public_address="1 High Street, London", public_phone="020 7946 0000", public_email="hello@example.com"
+        ),
     )
     business, _ = pair.bookings.list_services(pair.a)
     assert business.public_address == "1 High Street, London"
@@ -178,7 +176,7 @@ def test_contact_details_saved_by_an_owner_reach_customers_in_the_same_fields(pa
     assert business.public_email == "hello@example.com"
     assert business.payment_options == ("venue",)
     pair.owners.update_settings(
-        pair.owner_a, pair.a, {"public_address": None, "public_phone": None, "public_email": None}
+        pair.owner_a, pair.a, SettingsChanges(public_address=None, public_phone=None, public_email=None)
     )
     business, _ = pair.bookings.list_services(pair.a)
     assert (business.public_address, business.public_phone, business.public_email) == (None, None, None)

@@ -13,14 +13,13 @@ Customer details leave the database only through this module, and only to a memb
 import re
 import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg import errors
-from pydantic import BaseModel, StringConstraints, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from booking.refunds import refund_paid_booking
 from booking.service import (
@@ -31,7 +30,43 @@ from booking.service import (
     NotFoundError,
     online_payments_allowed,
 )
-from contracts import STRICT, DurationMinutes, PriceMinor, ServiceName, ServiceSlug, SortOrder, Weekday, from_row
+from contracts import (
+    PHONE_PATTERN,
+    STRICT,
+    AwareDatetime,
+    BookingStatus,
+    BreakMinutes,
+    BusinessName,
+    BusinessSlug,
+    Currency,
+    CutoffMinutes,
+    DisplayName,
+    DurationMinutes,
+    MeetingLink,
+    NoticeMinutes,
+    OwnerAddress,
+    OwnerBusinessName,
+    OwnerBusinessType,
+    OwnerEmail,
+    OwnerName,
+    PaymentStatus,
+    Plan,
+    PlanStatus,
+    PriceMinor,
+    Reference,
+    Role,
+    ServiceName,
+    ServiceSlug,
+    SortOrder,
+    StoredAddress,
+    StoredEmail,
+    StoredLink,
+    StoredPhone,
+    TimeZoneName,
+    Weekday,
+    WindowDays,
+    from_row,
+)
 from payments.base import BookingRefunds
 from postgres import Database
 
@@ -92,6 +127,12 @@ bookings store amounts without a currency, and payments are checked against the 
 changing either later needs a planned move-over. Provisional: the list of regions may change; keep it in
 step with ``NewBusinessBody.region`` in ``api/owner.py`` and the region choices on the sign-up and set-up pages."""
 
+BUSINESS_TYPE_PATTERN = "^(" + "|".join(BUSINESS_TYPES) + ")$"
+"""The business types as a pattern, for the sign-up record and the API."""
+
+REGION_PATTERN = "^(" + "|".join(REGIONS) + ")$"
+"""The regions as a pattern, for the sign-up record and the API."""
+
 DEFAULT_HOURS = [(weekday, time(9, 0), time(17, 0)) for weekday in range(1, 6)]
 """Monday to Friday, 09:00 to 17:00, for a new business."""
 
@@ -120,8 +161,7 @@ class InvalidChangeError(BookingError):
     """The change is well formed but not allowed, such as a working block that ends before it starts."""
 
 
-@dataclass(frozen=True)
-class Membership:
+class Membership(BaseModel):
     """A business an account may manage.
 
     Attributes:
@@ -137,21 +177,22 @@ class Membership:
         time_zone: The business's IANA time zone, which the owner screens show its dates in.
     """
 
-    slug: str
-    name: str
-    role: str
-    display_name: str | None = None
-    plan: str = "free"
-    plan_status: str = "active"
-    trial_ends_at: datetime | None = None
+    model_config = STRICT
+
+    slug: BusinessSlug
+    name: BusinessName
+    role: Role
+    display_name: DisplayName | None = None
+    plan: Plan = "free"
+    plan_status: PlanStatus = "active"
+    trial_ends_at: AwareDatetime | None = None
     online_payments: bool = False
-    plan_ends_at: datetime | None = None
-    time_zone: str = "Europe/London"
+    plan_ends_at: AwareDatetime | None = None
+    time_zone: TimeZoneName = "Europe/London"
 
 
-@dataclass(frozen=True)
-class NewBusiness:
-    """What an owner gives at sign-up to create their business. Shape is validated by the API.
+class NewBusiness(BaseModel):
+    """What an owner gives at sign-up to create their business. The text rules apply: this is input.
 
     Attributes:
         name: Company name, shown to customers.
@@ -163,17 +204,18 @@ class NewBusiness:
         region: One of :data:`REGIONS`; sets the business's time zone and currency.
     """
 
-    name: str
-    business_type: str
-    business_type_other: str | None
-    owner_name: str
-    plan: str
-    contact_email: str | None
-    region: str = "uk"
+    model_config = STRICT
+
+    name: OwnerBusinessName
+    business_type: Annotated[str, StringConstraints(pattern=BUSINESS_TYPE_PATTERN)]
+    business_type_other: OwnerBusinessType | None = None
+    owner_name: OwnerName
+    plan: Plan = "free"
+    contact_email: OwnerEmail | None = None
+    region: Annotated[str, StringConstraints(pattern=REGION_PATTERN)] = "uk"
 
 
-@dataclass(frozen=True)
-class OwnerBooking:
+class OwnerBooking(BaseModel):
     """A booking with the customer's details, for the business's own staff.
 
     Attributes:
@@ -193,19 +235,21 @@ class OwnerBooking:
         payment_status: ``not_required``, ``awaiting``, ``paid`` or ``refunded``.
     """
 
-    reference: str
-    status: str
-    service_slug: str
-    service_name: str
-    starts_at: datetime
-    ends_at: datetime
-    price_minor: int
-    customer_name: str
-    customer_email: str
-    customer_phone: str | None
-    customer_note: str | None
-    created_at: datetime
-    payment_status: str = "not_required"
+    model_config = STRICT
+
+    reference: Reference
+    status: BookingStatus
+    service_slug: ServiceSlug
+    service_name: ServiceName
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+    price_minor: Annotated[int, Field(ge=0)]
+    customer_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    customer_email: StoredEmail
+    customer_phone: StoredPhone | None
+    customer_note: Annotated[str, StringConstraints(max_length=1000)] | None
+    created_at: AwareDatetime
+    payment_status: PaymentStatus = "not_required"
 
 
 class OwnerServiceRecord(BaseModel):
@@ -299,8 +343,7 @@ class TimeOff(BaseModel):
         return self
 
 
-@dataclass(frozen=True)
-class Settings:
+class Settings(BaseModel):
     """The business's booking settings.
 
     Attributes:
@@ -319,19 +362,83 @@ class Settings:
         public_email: Email shown to customers, or ``None``.
     """
 
-    name: str
-    time_zone: str
-    currency: str
-    break_minutes: int
-    notice_minutes: int
-    window_days: int
-    cancel_cutoff_minutes: int = 1440
-    move_cutoff_minutes: int = 1440
-    contact_email: str | None = None
-    meeting_link: str | None = None
-    public_address: str | None = None
-    public_phone: str | None = None
-    public_email: str | None = None
+    model_config = STRICT
+
+    name: BusinessName
+    time_zone: TimeZoneName
+    currency: Currency
+    break_minutes: BreakMinutes
+    notice_minutes: NoticeMinutes
+    window_days: WindowDays
+    cancel_cutoff_minutes: CutoffMinutes = 1440
+    move_cutoff_minutes: CutoffMinutes = 1440
+    contact_email: StoredEmail | None = None
+    meeting_link: StoredLink | None = None
+    public_address: StoredAddress | None = None
+    public_phone: StoredPhone | None = None
+    public_email: StoredEmail | None = None
+
+
+CLEARABLE_SETTINGS = ("contact_email", "meeting_link", "public_address", "public_phone", "public_email")
+"""The settings an owner may clear by giving ``None``."""
+
+
+class SettingsChanges(BaseModel):
+    """Changes to the booking settings. The text rules apply: this is input.
+
+    Only the fields given are changed. A field given as ``None`` is cleared; only :data:`CLEARABLE_SETTINGS` may
+    be cleared.
+
+    Attributes:
+        name: Display name.
+        break_minutes: Break between sessions.
+        notice_minutes: How long before a session it may still be booked.
+        window_days: How many days ahead, counting today, are open for booking.
+        cancel_cutoff_minutes: How long before a session a customer may still cancel online.
+        move_cutoff_minutes: How long before a session a customer may still move it online.
+        contact_email: Where the business receives booking emails.
+        meeting_link: A link included in customer emails.
+        public_address: Address shown to customers.
+        public_phone: Phone shown to customers.
+        public_email: Email shown to customers.
+    """
+
+    model_config = STRICT
+
+    name: OwnerBusinessName | None = None
+    break_minutes: BreakMinutes | None = None
+    notice_minutes: NoticeMinutes | None = None
+    window_days: WindowDays | None = None
+    cancel_cutoff_minutes: CutoffMinutes | None = None
+    move_cutoff_minutes: CutoffMinutes | None = None
+    contact_email: OwnerEmail | None = None
+    meeting_link: MeetingLink | None = None
+    public_address: OwnerAddress | None = None
+    public_phone: Annotated[str, StringConstraints(pattern=PHONE_PATTERN)] | None = None
+    public_email: OwnerEmail | None = None
+
+    @model_validator(mode="after")
+    def check_clearing(self) -> "SettingsChanges":
+        """Refuse ``None`` for a setting that cannot be cleared.
+
+        Returns:
+            The changes.
+
+        Raises:
+            ValueError: If a setting outside :data:`CLEARABLE_SETTINGS` is given as ``None``.
+        """
+        for name in sorted(self.model_fields_set - set(CLEARABLE_SETTINGS)):
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be cleared")
+        return self
+
+    def values(self) -> dict[str, Any]:
+        """List the fields given, in field order.
+
+        Returns:
+            Field name to new value; ``None`` clears.
+        """
+        return {name: getattr(self, name) for name in type(self).model_fields if name in self.model_fields_set}
 
 
 _BOOKING_COLUMNS = (
@@ -406,7 +513,18 @@ class OwnerService:
             ).fetchall()
         now = datetime.now(UTC)
         return [
-            Membership(r[0], r[1], r[2], r[3], r[4], r[5], r[6], online_payments_allowed(r[4], r[6], now), r[7], r[8])
+            Membership(
+                slug=r[0],
+                name=r[1],
+                role=r[2],
+                display_name=r[3],
+                plan=r[4],
+                plan_status=r[5],
+                trial_ends_at=r[6],
+                online_payments=online_payments_allowed(r[4], r[6], now),
+                plan_ends_at=r[7],
+                time_zone=r[8],
+            )
             for r in rows
         ]
 
@@ -489,7 +607,15 @@ class OwnerService:
         except errors.UniqueViolation:
             raise ConflictError("This account already has a business.") from None
         return Membership(
-            slug, new.name, "owner", new.owner_name, new.plan, "active", trial_ends_at, True, time_zone=time_zone
+            slug=slug,
+            name=new.name,
+            role="owner",
+            display_name=new.owner_name,
+            plan=new.plan,
+            plan_status="active",
+            trial_ends_at=trial_ends_at,
+            online_payments=True,
+            time_zone=time_zone,
         )
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
@@ -521,7 +647,7 @@ class OwnerService:
                 "AND NOT (b.status = 'pending_payment' AND b.hold_expires_at <= now()) ORDER BY b.starts_at",
                 (business.id, period_start, period_end),
             ).fetchall()
-        return business, [OwnerBooking(*row) for row in rows]
+        return business, [from_row(OwnerBooking, row) for row in rows]
 
     def booking_by_reference(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
         """Find one booking by its reference.
@@ -550,7 +676,7 @@ class OwnerService:
             ).fetchone()
         if row is None:
             raise NotFoundError("Booking not found.")
-        return business, OwnerBooking(*row)
+        return business, from_row(OwnerBooking, row)
 
     def services(self, account: str, slug: str) -> list[OwnerServiceRecord]:
         """List all services of the business, active or not.
@@ -828,14 +954,17 @@ class OwnerService:
             "public_phone, public_email FROM businesses WHERE id = %s",
             (business.id,),
         ).fetchone()
-        return Settings(
-            business.name,
-            business.time_zone,
-            business.currency,
-            business.break_minutes,
-            business.notice_minutes,
-            business.window_days,
-            *extra,
+        return from_row(
+            Settings,
+            (
+                business.name,
+                business.time_zone,
+                business.currency,
+                business.break_minutes,
+                business.notice_minutes,
+                business.window_days,
+                *extra,
+            ),
         )
 
     def settings(self, account: str, slug: str) -> Settings:
@@ -854,15 +983,13 @@ class OwnerService:
         with self._database.connection() as connection:
             return self._settings(connection, self._member_business(connection, account, slug))
 
-    def update_settings(self, account: str, slug: str, changes: dict[str, Any]) -> Settings:
+    def update_settings(self, account: str, slug: str, changes: SettingsChanges) -> Settings:
         """Change some booking settings. Existing bookings are not affected.
 
         Args:
             account: The verified account identifier.
             slug: The business's public identifier.
-            changes: Fields to change, from ``name``, ``break_minutes``, ``notice_minutes``, ``window_days``,
-                ``cancel_cutoff_minutes``, ``move_cutoff_minutes``, ``contact_email``, ``meeting_link``,
-                ``public_address``, ``public_phone`` and ``public_email`` (``None`` clears the last five). Values are validated by the API.
+            changes: The fields to change, checked by the record.
 
         Returns:
             The updated settings.
@@ -870,27 +997,15 @@ class OwnerService:
         Raises:
             NotFoundError: If the account does not manage the business.
         """
-        allowed = {
-            "name",
-            "break_minutes",
-            "notice_minutes",
-            "window_days",
-            "cancel_cutoff_minutes",
-            "move_cutoff_minutes",
-            "contact_email",
-            "meeting_link",
-            "public_address",
-            "public_phone",
-            "public_email",
-        }
-        fields = [field for field in changes if field in allowed]
+        values = changes.values()
+        fields = list(values)
         with self._database.connection() as connection:
             business = self._member_business(connection, account, slug)
             if fields:
                 assignments = ", ".join(f"{field} = %s" for field in fields)
                 connection.execute(
                     f"UPDATE businesses SET {assignments} WHERE id = %s",
-                    (*[changes[field] for field in fields], business.id),
+                    (*values.values(), business.id),
                 )
                 business = self._member_business(connection, account, slug)
             return self._settings(connection, business)
@@ -947,4 +1062,4 @@ class OwnerService:
             raise NotFoundError("Booking not found.")
         if changed is not None and self._notifier is not None:
             self._notifier.booking_event("cancelled", str(changed[0]), None)
-        return business, OwnerBooking(*row)
+        return business, from_row(OwnerBooking, row)

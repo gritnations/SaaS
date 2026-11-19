@@ -134,7 +134,7 @@ class FakePayments:
             The set-up.
         """
         self._record("settings", account, slug)
-        return PaymentSettings("stripe", True, False, True)
+        return PaymentSettings(provider="stripe", connected=True, enabled=False, online_allowed=True)
 
     def connect(self, account: str, slug: str) -> str:
         """Answer with a sign-up link.
@@ -164,7 +164,14 @@ class FakePayments:
             The set-up.
         """
         self._record("set_options", account, slug, pay_online, pay_at_venue)
-        return PaymentSettings("stripe", True, True, True, bool(pay_online), pay_at_venue is not False)
+        return PaymentSettings(
+            provider="stripe",
+            connected=True,
+            enabled=True,
+            online_allowed=True,
+            pay_online=bool(pay_online),
+            pay_at_venue=pay_at_venue is not False,
+        )
 
     def record(self, event: PaymentEvent) -> bool:
         """Record the event and report that a booking changed.

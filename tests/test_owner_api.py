@@ -6,7 +6,6 @@ business's time zone, and the browser may send the owner's edits from the allowe
 checks against a real database are covered by ``test_owner_postgres.py``.
 """
 
-import dataclasses
 from datetime import UTC, date, datetime, time
 from typing import Any
 
@@ -26,6 +25,7 @@ from booking.owner import (
     OwnerServiceRecord,
     ServiceChanges,
     Settings,
+    SettingsChanges,
     TimeOff,
 )
 from booking.service import Business, NotFoundError
@@ -46,23 +46,30 @@ BUSINESS = Business(
     window_days=30,
 )
 BOOKING = OwnerBooking(
-    "ZA2JBN2C5B",
-    "confirmed",
-    "intro",
-    "Introductory call",
-    datetime(2026, 10, 20, 8, 30, tzinfo=UTC),
-    datetime(2026, 10, 20, 9, 0, tzinfo=UTC),
-    0,
-    "Sample Customer",
-    "customer@example.com",
-    "+44 7700 900000",
-    None,
-    datetime(2026, 10, 18, 16, 48, tzinfo=UTC),
+    reference="ZA2JBN2C5B",
+    status="confirmed",
+    service_slug="intro",
+    service_name="Introductory call",
+    starts_at=datetime(2026, 10, 20, 8, 30, tzinfo=UTC),
+    ends_at=datetime(2026, 10, 20, 9, 0, tzinfo=UTC),
+    price_minor=0,
+    customer_name="Sample Customer",
+    customer_email="customer@example.com",
+    customer_phone="+44 7700 900000",
+    customer_note=None,
+    created_at=datetime(2026, 10, 18, 16, 48, tzinfo=UTC),
 )
 SERVICE = OwnerServiceRecord(
     slug="intro", name="Introductory call", duration_minutes=30, price_minor=0, active=True, sort_order=1
 )
-SETTINGS = Settings("Example Advisory", "Europe/London", "GBP", 0, 240, 30)
+SETTINGS = Settings(
+    name="Example Advisory",
+    time_zone="Europe/London",
+    currency="GBP",
+    break_minutes=0,
+    notice_minutes=240,
+    window_days=30,
+)
 
 
 class FakeVerifier:
@@ -127,7 +134,7 @@ class FakeOwners:
             The membership.
         """
         self._record("create_business", account, new)
-        return Membership("new-company", new.name, "owner", new.owner_name)
+        return Membership(slug="new-company", name=new.name, role="owner", display_name=new.owner_name)
 
     def memberships(self, account: str) -> list[Membership]:
         """Return one membership.
@@ -139,7 +146,7 @@ class FakeOwners:
             The membership.
         """
         self._record("memberships", account)
-        return [Membership("example", "Example Advisory", "owner", time_zone="Asia/Riyadh")]
+        return [Membership(slug="example", name="Example Advisory", role="owner", time_zone="Asia/Riyadh")]
 
     def bookings(self, account: str, slug: str, start: date, days: int) -> tuple[Business, list[OwnerBooking]]:
         """Return one booking.
@@ -309,9 +316,9 @@ class FakeOwners:
             The business and the cancelled booking.
         """
         self._record("cancel_booking", account, slug, reference)
-        return BUSINESS, dataclasses.replace(BOOKING, status="cancelled")
+        return BUSINESS, BOOKING.model_copy(update={"status": "cancelled"})
 
-    def update_settings(self, account: str, slug: str, changes: dict[str, object]) -> Settings:
+    def update_settings(self, account: str, slug: str, changes: SettingsChanges) -> Settings:
         """Return the settings.
 
         Args:
