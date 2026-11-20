@@ -59,6 +59,7 @@ from contracts import (
     CustomerNote,
     CustomerPhone,
     DurationMinutes,
+    EventKind,
     IdempotencyKey,
     ManageToken,
     NoticeMinutes,
@@ -293,7 +294,7 @@ class Confirmation(BaseModel):
 class BookingNotifier(Protocol):
     """What the booking services need to announce a change. It must never raise."""
 
-    def booking_event(self, kind: str, booking_id: str, manage_token: str | None) -> None:
+    def booking_event(self, kind: EventKind, booking_id: str, manage_token: str | None) -> None:
         """Send the emails for one booking event and record the attempts.
 
         Args:

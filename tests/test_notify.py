@@ -6,8 +6,8 @@ in the business's time zone, and that the calendar file is well formed. What the
 how a real mail client renders the messages.
 """
 
-import dataclasses
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
@@ -21,6 +21,20 @@ from booking.notify import (
     site_url_from_environment,
     when_text,
 )
+
+
+def replace(context: Context, **changes: Any) -> Context:
+    """Copy a context with some fields changed, as the builders would receive it.
+
+    Args:
+        context: The context.
+        **changes: Fields to change.
+
+    Returns:
+        The copy. ``model_copy`` does not re-check it, so record checks are tested separately.
+    """
+    return context.model_copy(update=changes)
+
 
 TOKEN = "a" * 48
 BASE = Context(
@@ -88,22 +102,22 @@ def test_owner_gets_the_customer_details_and_can_reply_to_the_customer() -> None
 
 def test_no_owner_email_without_a_contact_address_or_when_the_owner_cancelled() -> None:
     """Without a contact email, or for the owner's own cancellation, the business is not emailed."""
-    assert owner_message(dataclasses.replace(BASE, contact_email=None)) is None
-    assert owner_message(dataclasses.replace(BASE, kind="cancelled", cancelled_by="owner")) is None
-    assert owner_message(dataclasses.replace(BASE, kind="cancelled", cancelled_by="customer")) is not None
+    assert owner_message(replace(BASE, contact_email=None)) is None
+    assert owner_message(replace(BASE, kind="cancelled", cancelled_by="owner")) is None
+    assert owner_message(replace(BASE, kind="cancelled", cancelled_by="customer")) is not None
 
 
 def test_cancellation_email_has_no_manage_link_and_says_who_cancelled() -> None:
     """A cancelled booking cannot be managed, so no link; the wording follows who cancelled."""
-    by_owner = customer_message(dataclasses.replace(BASE, kind="cancelled", cancelled_by="owner"))
+    by_owner = customer_message(replace(BASE, kind="cancelled", cancelled_by="owner"))
     assert TOKEN not in by_owner.html
     assert "by the business" in by_owner.text
-    assert "as you asked" in customer_message(dataclasses.replace(BASE, kind="cancelled", cancelled_by="customer")).text
+    assert "as you asked" in customer_message(replace(BASE, kind="cancelled", cancelled_by="customer")).text
 
 
 def test_calendar_file_is_well_formed_and_escaped() -> None:
     """CRLF lines, UTC times, a stable identifier, and escaped commas in the summary."""
-    data = calendar_file(dataclasses.replace(BASE, business_name="Smith, Jones; Partners")).decode()
+    data = calendar_file(replace(BASE, business_name="Smith, Jones; Partners")).decode()
     lines = data.split("\r\n")
     assert lines[0] == "BEGIN:VCALENDAR" and "END:VCALENDAR" in lines
     assert "DTSTART:20260707T083000Z" in lines
@@ -113,9 +127,9 @@ def test_calendar_file_is_well_formed_and_escaped() -> None:
 
 def test_a_moved_booking_updates_the_same_calendar_event() -> None:
     """The identifier stays the same and the sequence rises, so calendars update rather than duplicate."""
-    data = calendar_file(dataclasses.replace(BASE, kind="moved", sequence=2)).decode()
+    data = calendar_file(replace(BASE, kind="moved", sequence=2)).decode()
     assert "UID:ZA2JBN2C5B@example.com" in data and "SEQUENCE:2" in data
-    cancel = calendar_file(dataclasses.replace(BASE, kind="cancelled", sequence=2)).decode()
+    cancel = calendar_file(replace(BASE, kind="cancelled", sequence=2)).decode()
     assert "METHOD:CANCEL" in cancel and "STATUS:CANCELLED" in cancel
 
 
@@ -141,7 +155,7 @@ def test_the_calendar_identifier_uses_the_sending_domain() -> None:
     assert b"UID:ZA2JBN2C5B@mail.example.com" in message.attachments[0].content
 
 
-CANCELLED = dataclasses.replace(
+CANCELLED = replace(
     BASE, kind="cancelled", cancelled_by="customer", payment_status="refunded", price_minor=1500, currency="GBP"
 )
 
@@ -173,7 +187,7 @@ def test_a_refunded_cancellation_tells_the_business_there_is_nothing_to_do() -> 
 )
 def test_no_refund_is_mentioned_unless_a_card_payment_was_refunded(change: dict[str, object]) -> None:
     """Free, pay-at-venue, still-paid and non-cancellation emails never mention a refund."""
-    context = dataclasses.replace(CANCELLED, **change)  # type: ignore[arg-type]
+    context = replace(CANCELLED, **change)
     owner = owner_message(context)
     for message in (customer_message(context), owner):
         assert message is not None

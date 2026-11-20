@@ -28,6 +28,7 @@ __all__ = [
     "BreakMinutes",
     "BusinessName",
     "BusinessSlug",
+    "CancelledBy",
     "Currency",
     "CustomerEmail",
     "CustomerName",
@@ -37,6 +38,7 @@ __all__ = [
     "DisplayName",
     "DurationMinutes",
     "EMAIL_PATTERN",
+    "EventKind",
     "IdempotencyKey",
     "ManageToken",
     "MeetingLink",
@@ -226,6 +228,12 @@ DisplayName = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
 MeetingLink = Annotated[str, StringConstraints(pattern=r"^https://\S{4,}$", max_length=500)]
 """A meeting link as an owner enters it: ``https://``, no spaces, 12 to 500 characters."""
+
+EventKind = Literal["confirmed", "cancelled", "moved"]
+"""A booking event that sends emails. Must equal the database's check list on ``email_log.kind``."""
+
+CancelledBy = Literal["customer", "owner"]
+"""Who cancelled a booking. Must equal the database's check list on ``bookings.cancelled_by``."""
 
 EMAIL_PATTERN = r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]+$"
 """A plausible email address: a local part, one ``@``, and a domain with a dot."""
