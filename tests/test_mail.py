@@ -23,7 +23,7 @@ MESSAGE = Message(
     html="<p>Hi</p>",
     text="Hi",
     reply_to="owner@example.com",
-    attachments=[Attachment("booking.ics", b"BEGIN:VCALENDAR", "text/calendar")],
+    attachments=(Attachment(filename="booking.ics", content=b"BEGIN:VCALENDAR", content_type="text/calendar"),),
 )
 
 

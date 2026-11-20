@@ -15,11 +15,15 @@ Constraints:
 import base64
 import json
 import re
+import unicodedata
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Annotated, Protocol
+
+from pydantic import AfterValidator, BaseModel, Field, InstanceOf, StringConstraints
+
+from contracts import STRICT
 
 RESEND_URL = "https://api.resend.com/emails"
 API_KEY_ENV = "RESEND_API_KEY"
@@ -36,8 +40,47 @@ class MailError(Exception):
     """Raised when an email could not be sent. The message is a short status, never message content."""
 
 
-@dataclass(frozen=True)
-class Attachment:
+MAX_ATTACHMENT_BYTES = 1_000_000
+"""The largest file the platform attaches. Booking calendar files are a few hundred bytes."""
+
+
+def has_controls(value: str) -> bool:
+    """Check text for control characters, such as a line break, which must never reach a mail header.
+
+    Args:
+        value: The text.
+
+    Returns:
+        ``True`` when the text contains one.
+    """
+    return any(unicodedata.category(char) == "Cc" for char in value)
+
+
+def _header_text(value: str) -> str:
+    """Refuse header text that contains a control character.
+
+    Args:
+        value: The text.
+
+    Returns:
+        The text, unchanged.
+
+    Raises:
+        ValueError: If it contains a control character.
+    """
+    if has_controls(value):
+        raise ValueError("header text must not contain control characters")
+    return value
+
+
+Address = Annotated[str, StringConstraints(pattern=r"^[^@\s]+@[^@\s]+$", max_length=254)]
+"""An email address as a recipient or reply-to: one ``@`` and no spaces or line breaks."""
+
+Subject = Annotated[str, StringConstraints(min_length=1, max_length=300), AfterValidator(_header_text)]
+"""A subject line: 1 to 300 characters, no control characters."""
+
+
+class Attachment(BaseModel):
     """A file attached to an email.
 
     Attributes:
@@ -46,13 +89,14 @@ class Attachment:
         content_type: Its media type.
     """
 
-    filename: str
-    content: bytes
-    content_type: str
+    model_config = STRICT
+
+    filename: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9._-]{1,100}$")]
+    content: Annotated[bytes, Field(min_length=1, max_length=MAX_ATTACHMENT_BYTES)]
+    content_type: Annotated[str, StringConstraints(pattern=r"^[a-z]+/[a-z0-9.+-]+$")]
 
 
-@dataclass(frozen=True)
-class Message:
+class Message(BaseModel):
     """One email to one recipient.
 
     Attributes:
@@ -64,12 +108,14 @@ class Message:
         attachments: Files to attach.
     """
 
-    to: str
-    subject: str
-    html: str
-    text: str
-    reply_to: str | None = None
-    attachments: list[Attachment] = field(default_factory=list)
+    model_config = STRICT
+
+    to: Address
+    subject: Subject
+    html: Annotated[str, StringConstraints(min_length=1)]
+    text: Annotated[str, StringConstraints(min_length=1)]
+    reply_to: Address | None = None
+    attachments: tuple[InstanceOf[Attachment], ...] = ()
 
 
 class Mailer(Protocol):

@@ -17,29 +17,46 @@ import html
 import logging
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any, get_args
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel, Field, StringConstraints
+
 from booking.links import CustomerLinks, as_links
-from contracts import SITE_URL_PATTERN
-from mail import Attachment, Mailer, MailError, Message
+from contracts import (
+    SITE_URL_PATTERN,
+    STRICT,
+    AwareDatetime,
+    BusinessName,
+    BusinessSlug,
+    CancelledBy,
+    Currency,
+    EventKind,
+    PaymentStatus,
+    Reference,
+    ReturnUrl,
+    ServiceName,
+    StoredEmail,
+    StoredLink,
+    StoredPhone,
+    TimeZoneName,
+)
+from mail import Attachment, Mailer, MailError, Message, has_controls
 from postgres import Database, DatabaseUnavailableError
 
 LOGGER = logging.getLogger(__name__)
 
 SITE_URL_ENV = "PUBLIC_SITE_URL"
 _SITE_PATTERN = re.compile(SITE_URL_PATTERN)
-KINDS = ("confirmed", "cancelled", "moved")
+KINDS: tuple[str, ...] = get_args(EventKind)
 
 
 class NotifyConfigError(RuntimeError):
     """Raised when ``PUBLIC_SITE_URL`` is set but unusable."""
 
 
-@dataclass(frozen=True)
-class Context:
+class Context(BaseModel):
     """Everything the messages for one booking event need.
 
     Attributes:
@@ -65,26 +82,28 @@ class Context:
         currency: The business's ISO 4217 currency.
     """
 
-    kind: str
-    business_name: str
-    business_slug: str
-    time_zone: str
-    contact_email: str | None
-    meeting_link: str | None
-    reference: str
-    service_name: str
-    starts_at: datetime
-    ends_at: datetime
-    customer_name: str
-    customer_email: str
-    customer_phone: str | None
-    customer_note: str | None
-    cancelled_by: str | None
-    sequence: int
-    manage_url: str | None
-    payment_status: str = "not_required"
-    price_minor: int = 0
-    currency: str = "GBP"
+    model_config = STRICT
+
+    kind: EventKind
+    business_name: BusinessName
+    business_slug: BusinessSlug
+    time_zone: TimeZoneName
+    contact_email: StoredEmail | None
+    meeting_link: StoredLink | None
+    reference: Reference
+    service_name: ServiceName
+    starts_at: AwareDatetime
+    ends_at: AwareDatetime
+    customer_name: Annotated[str, StringConstraints(min_length=1, max_length=100)]
+    customer_email: StoredEmail
+    customer_phone: StoredPhone | None
+    customer_note: Annotated[str, StringConstraints(max_length=1000)] | None
+    cancelled_by: CancelledBy | None
+    sequence: Annotated[int, Field(ge=0)]
+    manage_url: ReturnUrl | None
+    payment_status: PaymentStatus = "not_required"
+    price_minor: Annotated[int, Field(ge=0)] = 0
+    currency: Currency = "GBP"
 
 
 def manage_url(site_url: str, slug: str, reference: str, token: str) -> str:
@@ -202,6 +221,23 @@ def calendar_file(context: Context, sender_domain: str = "example.com") -> bytes
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
+def subject_line(text: str) -> str:
+    """Replace control characters, such as a line break in an old stored name, with a space.
+
+    Subjects are built from stored names, and names saved before the text rules may contain them. A mail
+    header must never carry one, and the email must still be sent.
+
+    Args:
+        text: The subject as built.
+
+    Returns:
+        The subject with each control character replaced by a space.
+    """
+    if not has_controls(text):
+        return text
+    return "".join(" " if has_controls(char) else char for char in text)
+
+
 def _rows_html(rows: list[tuple[str, str]]) -> str:
     """Render label/value rows as an HTML table, escaping every value.
 
@@ -307,13 +343,17 @@ def customer_message(context: Context, sender_domain: str = "example.com") -> Me
     )
     return Message(
         to=context.customer_email,
-        subject=subject,
+        subject=subject_line(subject),
         html=_page(title, intro, rows, link, footer),
         text=_text(title, intro, rows, link, footer),
         reply_to=context.contact_email,
-        attachments=[
-            Attachment(f"booking-{context.reference}.ics", calendar_file(context, sender_domain), "text/calendar")
-        ],
+        attachments=(
+            Attachment(
+                filename=f"booking-{context.reference}.ics",
+                content=calendar_file(context, sender_domain),
+                content_type="text/calendar",
+            ),
+        ),
     )
 
 
@@ -349,7 +389,7 @@ def owner_message(context: Context) -> Message | None:
     footer = "Reply to this email to contact the customer."
     return Message(
         to=context.contact_email,
-        subject=f"{verb}: {context.service_name}, {when_text(context)}",
+        subject=subject_line(f"{verb}: {context.service_name}, {when_text(context)}"),
         html=_page(title, intro, rows, None, footer),
         text=_text(title, intro, rows, None, footer),
         reply_to=context.customer_email,
@@ -410,7 +450,7 @@ class Notifier:
         self._links = as_links(site_url)
         self._sender_domain = sender_domain
 
-    def _context(self, kind: str, booking_id: str, token: str | None) -> tuple[str, Context] | None:
+    def _context(self, kind: EventKind, booking_id: str, token: str | None) -> tuple[str, Context] | None:
         """Load what the messages need.
 
         Args:
@@ -474,7 +514,7 @@ class Notifier:
         except Exception as exc:  # noqa: BLE001 (recording must never break the caller)
             LOGGER.warning("email log write failed (%s)", type(exc).__name__)
 
-    def booking_event(self, kind: str, booking_id: str, manage_token: str | None) -> None:
+    def booking_event(self, kind: EventKind, booking_id: str, manage_token: str | None) -> None:
         """Send the emails for one booking event and record the attempts. Never raises.
 
         Args:
@@ -492,10 +532,14 @@ class Notifier:
         if loaded is None:
             return
         business_id, context = loaded
-        outgoing: list[tuple[str, Message | None]] = [
-            ("customer", customer_message(context, self._sender_domain)),
-            ("owner", owner_message(context)),
-        ]
+        try:
+            outgoing: list[tuple[str, Message | None]] = [
+                ("customer", customer_message(context, self._sender_domain)),
+                ("owner", owner_message(context)),
+            ]
+        except Exception as exc:  # noqa: BLE001 (a refused message must never break the booking change)
+            LOGGER.warning("email message refused (%s)", type(exc).__name__)
+            return
         for role, message in outgoing:
             if message is None:
                 continue
