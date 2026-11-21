@@ -38,7 +38,7 @@ function signedIn() {
 /** @returns {string} Where to go. */
 function destination() {
   const business = query.get("b") || "";
-  if (/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(business)) {
+  if (/^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/.test(business)) {
     return `${BOOKING_URL}/book/${business}${/^(paid|unpaid)=/.test(hashText) ? `#${hashText}` : ""}`;
   }
   if (hashText.startsWith("manage=")) return `${BOOKING_URL}/manage/#${hashText.slice("manage=".length)}`;
