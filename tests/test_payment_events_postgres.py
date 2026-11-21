@@ -110,11 +110,15 @@ def test_an_event_that_changed_nothing_leaves_no_record(events: Setup, caplog: p
 
 
 def test_an_event_without_an_identifier_is_still_applied(events: Setup) -> None:
-    """Providers that send no identifier keep working on the booking's own state; nothing is recorded."""
+    """Providers that send no identifier keep working on the booking's own state; nothing is recorded.
+
+    The table is counted before and after, so rows already in it (on a copy of a used database) do not matter.
+    """
+    before = events.connection.execute("SELECT count(*) FROM payment_events").fetchone()
     assert events.service.record(events.event("pi_events_4")) is True
     assert events.state() == ("confirmed", "paid", "pi_events_4")
-    found = events.connection.execute("SELECT count(*) FROM payment_events").fetchone()
-    assert found is not None and found[0] == 0
+    after = events.connection.execute("SELECT count(*) FROM payment_events").fetchone()
+    assert before is not None and after is not None and after[0] == before[0]
 
 
 def test_an_expired_checkout_and_a_refund_are_recorded_once(events: Setup) -> None:
