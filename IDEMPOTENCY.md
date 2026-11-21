@@ -55,5 +55,5 @@
 - **Retention.** Event records and idempotency keys have no expiry. Rows grow with use. No retention period is decided.
 - **Ordering.** Out-of-order delivery of provider events is not addressed. The event record recognises repeats, not order.
 - **Subscription notifications.** Not assessed.
-- **Migrations 0001 to 0014** are not atomic, and there is no migration runner. A rehearsal of applying every file to an empty database is not done.
+- **Migrations 0001 to 0014** are not atomic, and there is no migration runner. Applying every file, 0001 to 0019, to an empty database was rehearsed on 17 November 2026 (see `RESTORE.md`).
 - **The concurrency tests are timing-dependent.** They show the behaviour held in the runs made.
