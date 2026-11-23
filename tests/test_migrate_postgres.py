@@ -6,14 +6,16 @@ permission to create databases; if it has none, the tests are skipped.
 
 What these tests establish: an empty database gets every file and a full ledger; a second run applies nothing; a
 file that fails, or that does not record itself, leaves nothing behind and stops the run; a database with tables but
-no ledger is refused; ``--status`` changes nothing. They do not establish how the runner behaves on the hosted
-database, or with two runs at the same time.
+no ledger is refused; ``--status`` changes nothing; two runs started together apply each file once between them.
+They do not establish how the runner behaves on the hosted database, or with more than two runs.
 """
 
 import io
 import os
 import secrets
 import shutil
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -24,7 +26,7 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 from test_manage_postgres import URL_ENV
 
 from postgres import DatabaseSettings
-from scripts.migrate import DEFAULT_DIRECTORY, MigrationError, run
+from scripts.migrate import DEFAULT_DIRECTORY, LOCK_KEY, MigrationError, run
 
 pytestmark = pytest.mark.skipif(not os.environ.get(URL_ENV), reason=f"{URL_ENV} is not set")
 
@@ -33,11 +35,11 @@ FILE_COUNT = len(list(DEFAULT_DIRECTORY.glob("*.sql")))
 
 
 @pytest.fixture
-def scratch() -> Iterator[Connection]:
-    """Create an empty database, yield an autocommit owner connection to it, then drop it.
+def scratch_conninfo() -> Iterator[str]:
+    """Create an empty database, yield the owner's connection string for it, then drop it.
 
     Yields:
-        The connection to the new database.
+        The connection string for the new database. A secret; never printed.
     """
     conninfo = DatabaseSettings.from_env({"DATABASE_URL": os.environ[URL_ENV]}).conninfo
     name = "migrate_test_" + secrets.token_hex(6)
@@ -49,14 +51,24 @@ def scratch() -> Iterator[Connection]:
     params = conninfo_to_dict(conninfo)
     params["dbname"] = name
     try:
-        connection: Connection = psycopg.connect(make_conninfo("", **params), autocommit=True)
-        try:
-            yield connection
-        finally:
-            connection.close()
+        yield make_conninfo("", **params)
     finally:
         with psycopg.connect(conninfo, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
+
+
+@pytest.fixture
+def scratch(scratch_conninfo: str) -> Iterator[Connection]:
+    """Yield an autocommit owner connection to the empty database from ``scratch_conninfo``.
+
+    Yields:
+        The connection to the new database.
+    """
+    connection: Connection = psycopg.connect(scratch_conninfo, autocommit=True)
+    try:
+        yield connection
+    finally:
+        connection.close()
 
 
 def ledger(connection: Connection) -> list[str]:
@@ -165,3 +177,56 @@ def test_status_lists_pending_files_and_changes_nothing(scratch: Connection) -> 
     assert lines[0] == f"Applied: 0 of {FILE_COUNT}."
     assert len(lines) == FILE_COUNT + 1
     assert not table_exists(scratch, "schema_migrations")
+
+
+def test_two_runs_at_the_same_time_apply_each_file_once(scratch_conninfo: str, scratch: Connection) -> None:
+    """Two runs that both planned an empty database: every file is applied once, by one run, and neither fails.
+
+    The runner's lock is held while both runs start, so both plan against the empty database and then wait. It is
+    released only once both are waiting, so the overlap does not depend on timing luck.
+    """
+    results: dict[int, tuple[int, str] | Exception] = {}
+
+    def runner(index: int) -> None:
+        """Run the migrations on a connection of its own and keep the outcome.
+
+        Args:
+            index: Which of the two runs this is.
+        """
+        out = io.StringIO()
+        try:
+            with psycopg.connect(scratch_conninfo, autocommit=True) as connection:
+                results[index] = (run(connection, DEFAULT_DIRECTORY, out=out), out.getvalue())
+        except Exception as error:  # noqa: BLE001 - reported by the assertions below
+            results[index] = error
+
+    scratch.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
+    threads = [threading.Thread(target=runner, args=(index,)) for index in (0, 1)]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        row = scratch.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted").fetchone()
+        if row is not None and row[0] == 2:
+            break
+        time.sleep(0.05)
+    else:
+        scratch.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))
+        pytest.fail("Both runs did not reach the lock within 20 seconds.")
+    scratch.execute("SELECT pg_advisory_unlock(%s)", (LOCK_KEY,))
+    for thread in threads:
+        thread.join(timeout=120)
+
+    outcomes = [results[0], results[1]]
+    assert not [outcome for outcome in outcomes if isinstance(outcome, Exception)], outcomes
+    counts = [outcome[0] for outcome in outcomes if not isinstance(outcome, Exception)]
+    lines = [
+        line
+        for outcome in outcomes
+        if not isinstance(outcome, Exception)
+        for line in outcome[1].splitlines()
+        if line.startswith("Applied: ")
+    ]
+    assert ledger(scratch) == sorted(path.stem for path in DEFAULT_DIRECTORY.glob("*.sql"))
+    assert sum(counts) == FILE_COUNT, counts
+    assert sorted(lines) == sorted(f"Applied: {path.name}" for path in DEFAULT_DIRECTORY.glob("*.sql"))

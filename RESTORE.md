@@ -79,7 +79,7 @@ MIGRATION_DATABASE_URL=... python -m scripts.migrate            # apply what is 
 - Each later file runs in its own transaction. If a statement fails, or the file does not record itself in the ledger, the transaction is rolled back and the run stops with exit code 1.
 - A database with tables but no ledger, or with a ledger that names an unknown file or skips one, is refused before anything runs.
 - A file that opens or closes its own transaction is refused before anything runs. New files keep ending with their own ledger insert, as 0016 to 0019 do.
-- Each transaction first takes a database lock, so two runs at the same time do not apply the same file.
+- Each transaction first takes a database lock, so two runs at the same time do not apply the same file. A run that finds a file already applied by the other prints "Already applied by another run" for it and does not count it.
 
 **Rehearsed on 23 November 2026**, against a local PostgreSQL 17 server:
 
@@ -87,6 +87,7 @@ MIGRATION_DATABASE_URL=... python -m scripts.migrate            # apply what is 
 - The restored copy of staging (from section 1): `--status` showed 19 of 19 applied; a run printed "Nothing to apply." and changed nothing.
 - A deliberately failing file 0020 (a table, then a division by zero, then its ledger row): the run stopped with exit code 1; the table was not created and the ledger still had 19 rows.
 - A database with one unrelated table and no ledger: refused with exit code 1; nothing was created.
-- The runner's real-database tests (`tests/test_migrate_postgres.py`): 6 passed. The full suite on the rebuilt database: 907 passed, 1 skipped.
+- The runner's real-database tests (`tests/test_migrate_postgres.py`): 7 passed. The full suite on the rebuilt database: 907 passed, 1 skipped.
+- Two runs at the same time (tested 23 November, `test_two_runs_at_the_same_time_apply_each_file_once`, run 5 times): both planned the empty database and waited on the lock; every file was applied once, by one of them, neither failed, and the applied counts added up to 19. Before this was fixed, both runs reported all 19 as applied.
 
-Not rehearsed: running it against the hosted database, two runs at the same time, and a failure in the middle of 0001 to 0015 on a real server (covered only by a test on the local server).
+Not rehearsed: running it against the hosted database, and a failure in the middle of 0001 to 0015 on a real server (covered only by a test on the local server).
