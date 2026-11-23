@@ -35,6 +35,7 @@ from booking.service import (
     SlotTakenError,
     hash_token,
     release_expired_holds,
+    wait_for_days_off,
 )
 from contracts import STRICT, AwareDatetime, BookingStatus, PaymentStatus, Reference, from_row
 from payments.base import BookingRefunds
@@ -268,6 +269,7 @@ class ManageService:
                 current = loaded.managed
                 if not current.can_move:
                     raise TooLateError("This booking can no longer be moved online. Please contact the business.")
+                wait_for_days_off(connection, current.business.id)
                 release_expired_holds(connection, current.business.id)
                 days = self._bookings._days(
                     connection, current.business, current.service, [day], exclude_reference=current.reference

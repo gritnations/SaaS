@@ -399,6 +399,21 @@ def online_payments_allowed(plan: str, trial_ends_at: datetime | None, now: date
     return plan in PAID_PLANS or (trial_ends_at is not None and trial_ends_at > now)
 
 
+def wait_for_days_off(connection: psycopg.Connection[Any], business_id: str) -> None:
+    """Take a share lock on the business row before its days off are read for a booking or a move.
+
+    The owner adds days off while holding this row for update. Without the lock, a booking could read the days
+    off just before a new one commits, land on it, and be missed by the owner's count of bookings inside it.
+    With it, the booking waits for the owner's change and then sees the new day off. Bookings for the same
+    business share the lock, so they do not wait for each other.
+
+    Args:
+        connection: An open connection, inside the transaction that is about to take a time.
+        business_id: The business.
+    """
+    connection.execute("SELECT 1 FROM businesses WHERE id = %s FOR SHARE", (business_id,))
+
+
 def release_expired_holds(connection: psycopg.Connection[Any], business_id: str) -> None:
     """Mark a business's unpaid holds whose time has run out as ``expired``, releasing their time.
 
@@ -771,6 +786,7 @@ class BookingService:
                 service = self._service(connection, business, request.service)
                 method = self._payment_method(business, service, request.pay)
                 paid = method == "online"
+                wait_for_days_off(connection, business.id)
                 release_expired_holds(connection, business.id)
                 days = self._days(connection, business, service, [request.date])
                 slot = next(
