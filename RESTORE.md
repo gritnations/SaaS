@@ -49,7 +49,7 @@ Into a fresh database (local, or a new Supabase project):
 6. Set a new `app_api` password (`ALTER ROLE app_api PASSWORD ...`). Backups never contain role passwords. Keep it outside the repository and put the matching `DATABASE_URL` in the hosting settings, then redeploy.
 7. Check: row counts, constraint and index counts, grants, then `/health/ready` and one booking-page request.
 
-To check the repository's migrations alone, skip steps 2 to 6: apply `migrations/0001` to `0019` in order to an empty database, then run the test suite with `BOOKING_TEST_DATABASE_URL` pointing at it.
+To check the repository's migrations alone, skip steps 2 to 6: run the migration runner (section 6) against an empty database, then run the test suite with `BOOKING_TEST_DATABASE_URL` pointing at it.
 
 ## 4. Not covered
 
@@ -64,3 +64,29 @@ To check the repository's migrations alone, skip steps 2 to 6: apply `migrations
 1. Two real-database tests were out of date with migrations 0016 and 0019, so they failed on any up-to-date database. Fixed on `main` (commit `635a08e`).
 2. `test_an_event_without_an_identifier_is_still_applied` counted every row in `payment_events`, so it failed on a database that already held events. Fixed: it now compares the count before and after.
 3. The real-database tests do not run in CI, which is how finding 1 went unnoticed. Still open.
+
+## 6. Apply migrations with the runner
+
+`scripts/migrate.py` applies the files in `migrations/` in order, each one completely or not at all, and records each in the `schema_migrations` ledger. Take a backup first (section 2).
+
+```bash
+# MIGRATION_DATABASE_URL must be the database owner's connection string. Never print it or commit it.
+MIGRATION_DATABASE_URL=... python -m scripts.migrate --status   # list applied and pending files; change nothing
+MIGRATION_DATABASE_URL=... python -m scripts.migrate            # apply what is pending
+```
+
+- An empty database gets 0001 to 0015 in one transaction. 0015 creates the ledger and records all fifteen.
+- Each later file runs in its own transaction. If a statement fails, or the file does not record itself in the ledger, the transaction is rolled back and the run stops with exit code 1.
+- A database with tables but no ledger, or with a ledger that names an unknown file or skips one, is refused before anything runs.
+- A file that opens or closes its own transaction is refused before anything runs. New files keep ending with their own ledger insert, as 0016 to 0019 do.
+- Each transaction first takes a database lock, so two runs at the same time do not apply the same file.
+
+**Rehearsed on 23 November 2026**, against a local PostgreSQL 17 server:
+
+- An empty database: `--status` listed 19 pending files; the run applied all 19; the database then had 9 tables and 19 ledger rows. A second run printed "Nothing to apply."
+- The restored copy of staging (from section 1): `--status` showed 19 of 19 applied; a run printed "Nothing to apply." and changed nothing.
+- A deliberately failing file 0020 (a table, then a division by zero, then its ledger row): the run stopped with exit code 1; the table was not created and the ledger still had 19 rows.
+- A database with one unrelated table and no ledger: refused with exit code 1; nothing was created.
+- The runner's real-database tests (`tests/test_migrate_postgres.py`): 6 passed. The full suite on the rebuilt database: 907 passed, 1 skipped.
+
+Not rehearsed: running it against the hosted database, two runs at the same time, and a failure in the middle of 0001 to 0015 on a real server (covered only by a test on the local server).
