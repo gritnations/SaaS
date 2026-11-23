@@ -40,13 +40,41 @@ from booking.service import (
     online_payments_allowed,
 )
 from contracts import STRICT, ProviderName
-from payments.base import AccountPayments, BookingPaymentEvent, ProviderUnavailableError
+from payments.base import AccountPayments, BookingPaymentEvent, ProviderUnavailableError, SubscriptionEvent
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
 
 MAX_EVENT_ID = 255
 """The longest provider event identifier that is recorded; the table refuses longer ones."""
+
+
+def first_delivery(connection: psycopg.Connection[Any], event: BookingPaymentEvent | SubscriptionEvent) -> bool:
+    """Record that the provider's event is being applied, unless it was applied before.
+
+    Call this inside a savepoint, in the same transaction as the change the event causes, and roll the savepoint
+    back when nothing changed, so that only an event that changed a booking or a plan is recorded.
+
+    Args:
+        connection: An open connection, inside the transaction that applies the event.
+        event: The verified event.
+
+    Returns:
+        ``False`` when this provider event identifier was recorded before, so the event must be ignored.
+        ``True`` when it is new, and also when the event has no usable identifier, in which case the
+        booking's or business's own state is the only guard.
+    """
+    if not event.event_id or len(event.event_id) > MAX_EVENT_ID:
+        return True
+    result = connection.execute(
+        "INSERT INTO payment_events (provider, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+        (event.provider, event.event_id),
+    )
+    if result.rowcount != 1:
+        LOGGER.info("payment event already processed provider=%s", event.provider)
+        return False
+    return True
+
 
 _BOOKING_QUERY = (
     "SELECT b.id::text, b.reference, b.status, b.payment_status, b.price_minor, z.currency, z.payment_account_id "
@@ -353,33 +381,6 @@ class PaymentService:
             payment_account, f"{self._site_url}/#payments=done", f"{self._site_url}/#payments=retry"
         )
 
-    @staticmethod
-    def _first_delivery(connection: psycopg.Connection[Any], event: BookingPaymentEvent) -> bool:
-        """Record that the provider's event is being applied, unless it was applied before.
-
-        Call this inside a savepoint, in the same transaction as the booking change, and roll the savepoint back
-        when nothing changed, so that only an event that changed a booking is recorded.
-
-        Args:
-            connection: An open connection, inside the transaction that applies the event.
-            event: The verified event.
-
-        Returns:
-            ``False`` when this provider event identifier was recorded before, so the event must be ignored.
-            ``True`` when it is new, and also when the event has no usable identifier, in which case the
-            booking's own state is the only guard.
-        """
-        if not event.event_id or len(event.event_id) > MAX_EVENT_ID:
-            return True
-        result = connection.execute(
-            "INSERT INTO payment_events (provider, event_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            (event.provider, event.event_id),
-        )
-        if result.rowcount != 1:
-            LOGGER.info("payment event already processed provider=%s", event.provider)
-            return False
-        return True
-
     def _record_refund(self, event: BookingPaymentEvent) -> bool:
         """Mark a booking refunded when its payment was refunded in full outside the product.
 
@@ -399,7 +400,7 @@ class PaymentService:
             return False
         with self._database.connection() as connection:
             with connection.transaction():
-                if not self._first_delivery(connection, event):
+                if not first_delivery(connection, event):
                     return False
                 result = connection.execute(
                     "UPDATE bookings b SET payment_status = 'refunded' FROM businesses z "
@@ -451,7 +452,7 @@ class PaymentService:
                 return False
             if event.status != "paid":
                 with connection.transaction():
-                    if not self._first_delivery(connection, event):
+                    if not first_delivery(connection, event):
                         return False
                     result = connection.execute(
                         "UPDATE bookings SET status = 'expired', checkout_id = %s "
@@ -469,7 +470,7 @@ class PaymentService:
             token = secrets.token_hex(MANAGE_TOKEN_BYTES)
             try:
                 with connection.transaction():
-                    if not self._first_delivery(connection, event):
+                    if not first_delivery(connection, event):
                         return False
                     connection.execute(
                         "UPDATE bookings SET status = 'confirmed', payment_status = 'paid', checkout_id = %s, "
@@ -479,7 +480,7 @@ class PaymentService:
             except errors.ExclusionViolation:
                 try:
                     with connection.transaction():
-                        if not self._first_delivery(connection, event):
+                        if not first_delivery(connection, event):
                             return False
                         connection.execute(
                             "UPDATE bookings SET payment_status = 'paid', checkout_id = %s, payment_id = %s, "

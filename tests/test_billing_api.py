@@ -306,6 +306,15 @@ def test_a_subscription_notification_reaches_billing_not_booking_payments() -> N
     assert billing.calls[0][1][0].status == "subscription_active"
 
 
+def test_a_subscription_notification_is_retried_when_stripe_cannot_be_asked() -> None:
+    """Billing could not read the subscription from Stripe: 503, so Stripe sends the notification again."""
+    billing = FakeBilling(ProviderUnavailableError("Stripe could not read the subscription."))
+    body = platform_event("checkout.session.completed", SUBSCRIBED)
+    response = client(billing).post("/payments/stripe/webhook", content=body, headers=sign(body, BILLING_SECRET))
+    assert response.status_code == 503
+    assert "Stripe could not" not in response.text
+
+
 def test_online_payments_are_on_every_plan_until_the_plan_rule_is_switched_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """Off (today): every plan, trial or not. On: only paid plans and a running trial."""
     from booking.service import online_payments_allowed

@@ -62,6 +62,7 @@ from payments.base import (
     PaymentProvider,
     PaymentRegistry,
     ProviderNotLiveError,
+    ProviderUnavailableError,
     SubscriptionEvent,
     UnknownProviderError,
     WebhookRejectedError,
@@ -478,7 +479,8 @@ def create_api(
 
         Raises:
             HTTPException: 404 for an unknown provider. 501 when the provider is not live. 400 when the
-               adapter rejects the notification. 503 when the database is unreachable, so the provider retries.
+               adapter rejects the notification. 503 when the database is unreachable, or the provider
+               cannot be asked for a subscription's current state, so the provider retries.
         """
         adapter = provider_for(provider)
         headers = {name.lower(): value for name, value in request.headers.items()}
@@ -495,7 +497,7 @@ def create_api(
                 recorded = billing.record(event)
             elif is_stripe and isinstance(event, BookingPaymentEvent) and payments is not None:
                 recorded = payments.record(event)
-        except DatabaseUnavailableError:
+        except (DatabaseUnavailableError, ProviderUnavailableError):
             raise HTTPException(status_code=503, detail="Try again later.") from None
         LOGGER.info(
             "payment notification accepted provider=%s live=%s status=%s recorded=%s",

@@ -28,7 +28,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import stripe
 from pydantic import ValidationError
@@ -45,6 +45,7 @@ from payments.base import (
     ProviderUnavailableError,
     SubscriptionEvent,
     SubscriptionOrder,
+    SubscriptionState,
     WebhookRejectedError,
 )
 
@@ -60,7 +61,7 @@ COUNTRY_BY_CURRENCY = {"GBP": "gb"}
 """The country a new account is created in, by the business's currency. Others are asked during sign-up."""
 
 _PAID_EVENTS = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
-_SUBSCRIPTION_STATUS = {
+_SUBSCRIPTION_STATUS: dict[str, Literal["subscription_active", "subscription_past_due", "subscription_ended"]] = {
     "active": "subscription_active",
     "past_due": "subscription_past_due",
     "unpaid": "subscription_past_due",
@@ -345,6 +346,52 @@ class StripeProvider:
             raise self._unavailable("cancel the subscription", exc) from None
         LOGGER.info("stripe plan cancelled subscription=%s refund=%s", subscription_id, refunded.refund_minor)
         return refunded
+
+    def subscription_state(self, subscription_id: str) -> SubscriptionState:
+        """Read the subscription's current status, business, plan and end date from Stripe.
+
+        A notification can arrive late or out of order, so billing acts on this rather than on the
+        notification itself.
+
+        Args:
+            subscription_id: The subscription a verified notification named.
+
+        Returns:
+            The state now. A subscription Stripe does not know, or one with a field that does not fit, is
+            reported with no status, so nothing changes.
+
+        Raises:
+            ProviderUnavailableError: If Stripe refused for another reason or could not be reached.
+        """
+        try:
+            subscription: Any = self._client.v1.subscriptions.retrieve(subscription_id)
+        except stripe.InvalidRequestError as exc:
+            if getattr(exc, "http_status", None) != 404:
+                raise self._unavailable("read the subscription", exc) from None
+            LOGGER.warning("stripe subscription not found provider=%s", self.name)
+            return SubscriptionState(status=None)
+        except stripe.StripeError as exc:
+            raise self._unavailable("read the subscription", exc) from None
+        item: dict[str, Any] = subscription.to_dict() if hasattr(subscription, "to_dict") else {}
+        raw_marks = item.get("metadata")
+        marks: dict[str, Any] = raw_marks if isinstance(raw_marks, dict) else {}
+        try:
+            business: uuid.UUID | None = uuid.UUID(_text(marks.get("business_id")) or "")
+        except ValueError:
+            business = None
+        try:
+            return SubscriptionState(
+                status=_SUBSCRIPTION_STATUS.get(str(item.get("status"))),
+                business_id=business,
+                plan=_text(marks.get("plan")),
+                ends_at=self._subscription_end(item),
+            )
+        except ValidationError as exc:
+            LOGGER.warning(
+                "stripe subscription field does not fit fields=%s",
+                sorted({str(error["loc"][0]) for error in exc.errors() if error["loc"]}),
+            )
+            return SubscriptionState(status=None)
 
     def _refund_once(self, subscription_id: str, last: _LastPayment) -> CancellationQuote:
         """Refund the quoted amount unless this subscription's cancellation refund already exists.
@@ -700,6 +747,7 @@ class StripeProvider:
             plan=_text(marks.get("plan")),
             ends_at=ends_at,
             ends_known=ends_known,
+            event_id=_text(getattr(event, "id", None)),
         )
 
     def _checked(
