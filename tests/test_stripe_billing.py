@@ -4,7 +4,9 @@ webhook bodies are signed here with Stripe's published signature scheme.
 What these tests establish: the billing secret is optional, must be distinct and well formed; a plan
 checkout is a monthly subscription at the price decided on the server, reusing one Stripe price per plan
 and amount; the portal link is for the business's customer; subscription notifications are read only when
-signed by the platform destination's secret, and each secret is trusted only for its own kind of event.
+signed by the platform destination's secret, and each secret is trusted only for its own kind of event;
+and a subscription read back from Stripe reports its current status, business, plan and end date, a
+subscription Stripe does not know reads as needing no action, and any other failure is the boundary's error.
 They do not establish that Stripe accepts these requests: that is checked by hand in Stripe test mode.
 """
 
@@ -306,6 +308,7 @@ def test_subscription_notifications_map_to_one_status(kind: str, item: dict[str,
             "cus_test_1",
             "starter",
         )
+        assert parsed.event_id == "evt_billing_1"
 
 
 def test_each_secret_is_trusted_only_for_its_own_kind_of_notification() -> None:
@@ -372,3 +375,107 @@ def test_a_subscription_notification_without_a_business_or_subscription_is_ignor
     assert (parsed.provider, parsed.status, parsed.live) == ("stripe", "ignored", False)
     assert "without a business" in caplog.text or "fields do not fit" in caplog.text
     assert "not-a-business" not in caplog.text
+
+
+class FakeSubscriptionClient:
+    """Answers subscription reads with one fixed subscription, or raises a chosen failure.
+
+    Attributes:
+        item: The subscription Stripe holds, as Stripe returns it.
+        fail: If set, every read raises it.
+        reads: The subscriptions read.
+    """
+
+    def __init__(self, item: dict[str, Any] | None = None, fail: Exception | None = None) -> None:
+        """Create the fake.
+
+        Args:
+            item: The subscription.
+            fail: An error for every read to raise.
+        """
+        self.item = item or {}
+        self.fail = fail
+        self.reads: list[tuple[Any, ...]] = []
+        self.v1 = SimpleNamespace(subscriptions=SimpleNamespace(retrieve=self._retrieve))
+
+    def _retrieve(self, *args: Any) -> SimpleNamespace:
+        """Answer a subscription read.
+
+        Args:
+            *args: The request's arguments.
+
+        Returns:
+            The subscription, with ``to_dict`` as Stripe's objects have.
+
+        Raises:
+            Exception: The configured failure, if any.
+        """
+        self.reads.append(args)
+        if self.fail is not None:
+            raise self.fail
+        return SimpleNamespace(to_dict=lambda: self.item)
+
+
+SUBSCRIPTION = {"object": "subscription", "id": "sub_test_1", "customer": "cus_test_1", "metadata": MARKS}
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("active", "subscription_active"),
+        ("past_due", "subscription_past_due"),
+        ("unpaid", "subscription_past_due"),
+        ("canceled", "subscription_ended"),
+        ("incomplete_expired", "subscription_ended"),
+        ("incomplete", None),
+        ("trialing", None),
+    ],
+)
+def test_a_subscription_is_read_again_with_its_current_status(status: str, expected: str | None) -> None:
+    """The current status maps as notifications do; the business and plan come from the subscription."""
+    client = FakeSubscriptionClient({**SUBSCRIPTION, "status": status})
+    state = billing_provider(cast(Any, client)).subscription_state("sub_test_1")
+    assert client.reads == [("sub_test_1",)]
+    assert (state.status, str(state.business_id), state.plan, state.ends_at) == (expected, BUSINESS, "starter", None)
+
+
+def test_a_subscription_read_again_reports_when_it_ends() -> None:
+    """cancel_at becomes ends_at; a subscription not set to end has none."""
+    ends = int(datetime(2026, 12, 1, tzinfo=UTC).timestamp())
+    client = FakeSubscriptionClient({**SUBSCRIPTION, "status": "active", "cancel_at": ends})
+    state = billing_provider(cast(Any, client)).subscription_state("sub_test_1")
+    assert state.ends_at == datetime(2026, 12, 1, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        {**SUBSCRIPTION, "status": "active", "metadata": {}},
+        {**SUBSCRIPTION, "status": "active", "metadata": {"business_id": "not-a-uuid", "plan": "starter"}},
+    ],
+)
+def test_a_subscription_without_a_business_is_read_with_no_business(item: dict[str, Any]) -> None:
+    """A missing or malformed business mark reads as no business, so billing changes nothing."""
+    state = billing_provider(cast(Any, FakeSubscriptionClient(item))).subscription_state("sub_test_1")
+    assert state.business_id is None
+
+
+def test_a_subscription_stripe_does_not_know_is_read_with_no_status() -> None:
+    """Not found is an answer, not an outage: nothing changes and Stripe is not asked to retry."""
+    missing = stripe.InvalidRequestError("No such subscription", "id", http_status=404)  # type: ignore[no-untyped-call]
+    state = billing_provider(cast(Any, FakeSubscriptionClient(fail=missing))).subscription_state("sub_gone")
+    assert state.status is None and state.business_id is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        stripe.APIConnectionError("network down"),  # type: ignore[no-untyped-call]
+        stripe.InvalidRequestError("Bad request", "id", http_status=400),  # type: ignore[no-untyped-call]
+        stripe.AuthenticationError("bad key"),
+    ],
+)
+def test_a_failed_subscription_read_becomes_the_boundary_error(failure: Exception) -> None:
+    """Any other Stripe failure surfaces as ProviderUnavailableError, so the notification is retried."""
+    with pytest.raises(ProviderUnavailableError):
+        billing_provider(cast(Any, FakeSubscriptionClient(fail=failure))).subscription_state("sub_test_1")

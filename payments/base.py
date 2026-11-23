@@ -139,6 +139,12 @@ class SubscriptionEvent(BaseModel):
         ends_at: When a cancelled subscription will end, or ``None`` when it is not set to end. Only events
             about the subscription itself carry it; ``ends_known`` says whether this one does.
         ends_known: Whether the event reports the subscription's end date (``ends_at`` may still be ``None``).
+        event_id: The provider's own identifier for this notification, used to recognise a repeat. ``None``
+            when the provider sends none.
+
+    Notifications can arrive late, more than once and out of order. Billing therefore uses one only to learn
+    which business and subscription to look at, and acts on :class:`SubscriptionState`, read from the
+    provider when the notification is applied.
     """
 
     model_config = STRICT
@@ -152,6 +158,26 @@ class SubscriptionEvent(BaseModel):
     plan: str | None = None
     ends_at: AwareDatetime | None = None
     ends_known: bool = False
+    event_id: ProviderId | None = None
+
+
+class SubscriptionState(BaseModel):
+    """A business's plan subscription as the provider reports it at the moment it is asked.
+
+    Attributes:
+        status: ``"subscription_active"``, ``"subscription_past_due"`` or ``"subscription_ended"``, or ``None``
+            when the current status needs no action, for example a first payment not yet completed.
+        business_id: The business recorded when the subscription was started, or ``None`` when it is missing.
+        plan: The plan recorded when the subscription was started, or ``None`` when it is missing.
+        ends_at: When the subscription is set to end, or ``None`` when it is not set to end.
+    """
+
+    model_config = STRICT
+
+    status: Literal["subscription_active", "subscription_past_due", "subscription_ended"] | None
+    business_id: uuid.UUID | None = None
+    plan: str | None = None
+    ends_at: AwareDatetime | None = None
 
 
 class IgnoredEvent(BaseModel):
@@ -270,6 +296,20 @@ class SubscriptionBilling(Protocol):
 
         Returns:
             The quote.
+
+        Raises:
+            ProviderUnavailableError: If the provider could not be asked.
+        """
+        ...
+
+    def subscription_state(self, subscription_id: str) -> SubscriptionState:
+        """Read the subscription's current state from the provider.
+
+        Args:
+            subscription_id: The subscription a verified notification named.
+
+        Returns:
+            The state now. An unknown subscription is reported with no status.
 
         Raises:
             ProviderUnavailableError: If the provider could not be asked.

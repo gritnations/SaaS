@@ -15,6 +15,11 @@ State transitions of a business's plan:
     * a subscription set to cancel later keeps its plan; ``plan_ends_at`` records when it will end.
     * the owner cancels from the Plan screen -> the unused days are refunded, the subscription ends at
       once and the business moves to the free plan, ``active``.
+
+The provider's notifications can arrive late, repeated or out of order. Each one only says which business and
+subscription to look at: the subscription's current state is read from the provider, with the business
+locked, and that state is what moves the plan. A notification that changed a plan is recorded by its event
+identifier, so a repeat of it is ignored.
 """
 
 import logging
@@ -25,8 +30,15 @@ from typing import Any, Protocol
 import psycopg
 
 from booking.owner import PLAN_CURRENCY, PLAN_PRICES, InvalidChangeError
+from booking.payments import first_delivery
 from booking.service import NotFoundError
-from payments.base import CancellationQuote, SubscriptionBilling, SubscriptionEvent, SubscriptionOrder
+from payments.base import (
+    CancellationQuote,
+    SubscriptionBilling,
+    SubscriptionEvent,
+    SubscriptionOrder,
+    SubscriptionState,
+)
 from postgres import Database
 
 LOGGER = logging.getLogger(__name__)
@@ -298,7 +310,14 @@ class BillingService:
         return refunded
 
     def record(self, event: SubscriptionEvent) -> bool:
-        """Apply a verified subscription event to its business.
+        """Bring a business's plan up to date after a verified subscription notification.
+
+        Notifications can arrive late, more than once and out of order, so the notification only says which
+        business and subscription to look at. With the business locked, the subscription's current state is
+        read from the provider and that is applied. Two notifications for one business are therefore applied
+        one after the other, each with a fresh read, and a late "active" notice for a subscription that has
+        since ended changes nothing. A notification that changed the plan is recorded by its event identifier,
+        in the same transaction, and a repeat of it is ignored before the provider is asked.
 
         Args:
             event: An event whose signature the provider adapter has verified.
@@ -308,6 +327,8 @@ class BillingService:
 
         Raises:
             postgres.DatabaseUnavailableError: If the database cannot be reached, so the provider retries.
+            payments.base.ProviderUnavailableError: If the provider could not be asked, so it retries. Nothing
+                is changed.
         """
         business_id = str(event.business_id)
         with self._database.connection() as connection:
@@ -319,43 +340,67 @@ class BillingService:
             if row is None:
                 LOGGER.warning("subscription event for an unknown business provider=%s", event.provider)
                 return False
-            slug, plan, status, subscription, ends_at = row
-            same = subscription == event.subscription_id
-            new_ends = event.ends_at if event.ends_known else ends_at
-            if event.status == "subscription_active":
-                if event.plan not in PLAN_PRICES:
-                    LOGGER.error("subscription event names no paid plan business=%s", slug)
+            changed = False
+            with connection.transaction():
+                if not first_delivery(connection, event):
                     return False
-                if not same and subscription is not None:
-                    LOGGER.error("second subscription for a business already on a plan business=%s", slug)
-                    return False
-                if same and status == "active" and plan == event.plan and new_ends == ends_at:
-                    return False
-                connection.execute(
-                    "UPDATE businesses SET plan = %s, plan_status = 'active', billing_subscription_id = %s, "
-                    "billing_customer_id = COALESCE(%s, billing_customer_id), plan_ends_at = %s WHERE id = %s",
-                    (
-                        event.plan,
-                        event.subscription_id,
-                        event.customer_id,
-                        new_ends if same else event.ends_at,
-                        business_id,
-                    ),
-                )
-            elif not same:
+                current = self._provider.subscription_state(event.subscription_id)
+                changed = self._apply(connection, event, current, row)
+                if not changed:
+                    raise psycopg.Rollback
+        if changed:
+            LOGGER.info("plan %s business=%s", current.status, row[0])
+        return changed
+
+    @staticmethod
+    def _apply(
+        connection: psycopg.Connection[Any], event: SubscriptionEvent, current: SubscriptionState, row: tuple[Any, ...]
+    ) -> bool:
+        """Apply a subscription's current state to its locked business.
+
+        Args:
+            connection: An open connection, inside the transaction that holds the business locked.
+            event: The verified notification, for the business, subscription and customer it names.
+            current: The subscription's state, read from the provider just now.
+            row: The business's ``(slug, plan, plan_status, subscription, plan_ends_at)``.
+
+        Returns:
+            Whether the business changed.
+        """
+        slug, plan, status, subscription, ends_at = row
+        if current.business_id != event.business_id:
+            LOGGER.error("subscription does not belong to the business it was reported for business=%s", slug)
+            return False
+        if current.status is None:
+            return False
+        same = subscription == event.subscription_id
+        if current.status == "subscription_active":
+            if current.plan not in PLAN_PRICES:
+                LOGGER.error("subscription names no paid plan business=%s", slug)
                 return False
-            elif event.status == "subscription_past_due":
-                if status == "past_due" and new_ends == ends_at:
-                    return False
-                connection.execute(
-                    "UPDATE businesses SET plan_status = 'past_due', plan_ends_at = %s WHERE id = %s",
-                    (new_ends, business_id),
-                )
-            else:
-                connection.execute(
-                    "UPDATE businesses SET plan = 'free', plan_status = 'active', billing_subscription_id = NULL, "
-                    "plan_ends_at = NULL WHERE id = %s",
-                    (business_id,),
-                )
-        LOGGER.info("plan %s business=%s", event.status, slug)
+            if not same and subscription is not None:
+                LOGGER.error("second subscription for a business already on a plan business=%s", slug)
+                return False
+            if same and status == "active" and plan == current.plan and current.ends_at == ends_at:
+                return False
+            connection.execute(
+                "UPDATE businesses SET plan = %s, plan_status = 'active', billing_subscription_id = %s, "
+                "billing_customer_id = COALESCE(%s, billing_customer_id), plan_ends_at = %s WHERE id = %s",
+                (current.plan, event.subscription_id, event.customer_id, current.ends_at, str(event.business_id)),
+            )
+        elif not same:
+            return False
+        elif current.status == "subscription_past_due":
+            if status == "past_due" and current.ends_at == ends_at:
+                return False
+            connection.execute(
+                "UPDATE businesses SET plan_status = 'past_due', plan_ends_at = %s WHERE id = %s",
+                (current.ends_at, str(event.business_id)),
+            )
+        else:
+            connection.execute(
+                "UPDATE businesses SET plan = 'free', plan_status = 'active', billing_subscription_id = NULL, "
+                "plan_ends_at = NULL WHERE id = %s",
+                (str(event.business_id),),
+            )
         return True
