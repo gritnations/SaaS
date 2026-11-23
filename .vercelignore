@@ -1,0 +1,14 @@
+# Local deploy only: upload just the platform runtime. Never upload secrets.
+.env
+.env.*
+.venv/
+node_modules/
+schedule-booking/
+tests/
+.circleci/
+.github/
+.mypy_cache/
+.pytest_cache/
+__pycache__/
+*.md
+migrations/
