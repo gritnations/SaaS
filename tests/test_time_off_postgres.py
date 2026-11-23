@@ -5,25 +5,29 @@ Skipped unless ``BOOKING_TEST_DATABASE_URL`` is set. The database must have ever
 
 What these tests establish: a day off closes whole local days, both ends included, for the public availability, a
 direct booking request and a customer move, and only for its own business; a booking that already exists is never
-touched, and the owner is told how many fall inside new days off; entries can be added, listed, overlapped and
+touched, and the owner is told how many fall inside new days off; a booking or move made while a day off is
+being added waits for it and is refused, so no booking lands on a new day off without being counted; entries can be added, listed, overlapped and
 removed by the business's own owner only; the limits and the past-date rule hold; days are the business's own
 local dates; and the Data API roles cannot read the table.
 """
 
 import os
 import secrets
+import threading
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
 from psycopg import errors
 
 from booking.manage import ManageService
 from booking.owner import MAX_TIME_OFF, InvalidChangeError, OwnerService
-from booking.service import BookingRequest, BookingService, InvalidSlotError, NotFoundError
+from booking.service import BookingRequest, BookingService, Confirmation, InvalidSlotError, NotFoundError
 from postgres import Database, DatabaseSettings
 
 URL_ENV = "BOOKING_TEST_DATABASE_URL"
@@ -247,6 +251,118 @@ def live_starts_on(world: World, day: date) -> list[str]:
             (world.slug,),
         ).fetchall()
     return [r[0].astimezone(zone).strftime("%H:%M") for r in rows if r[0].astimezone(zone).date() == day]
+
+
+def attempt(action: Callable[[], object], outcomes: list[object]) -> None:
+    """Run an action and keep its result or the exception it raised.
+
+    Args:
+        action: What to run.
+        outcomes: Where the result or exception goes.
+    """
+    try:
+        outcomes.append(action())
+    except Exception as exc:  # noqa: BLE001 - the outcome is what the test checks
+        outcomes.append(exc)
+
+
+def while_a_day_off_is_being_added(world: World, day: date, action: Callable[[], object]) -> object:
+    """Run an action while a day off is added but not yet committed, as the owner's own transaction does it.
+
+    The day off is added with the statements ``OwnerService.add_time_off`` uses: the business row locked for
+    update, then the insert. The action starts in another thread, and the day off is committed only once the
+    action is waiting on a lock, so the overlap does not depend on timing.
+
+    Args:
+        world: The test business.
+        day: The local date being closed.
+        action: The booking or move to run meanwhile.
+
+    Returns:
+        The action's result, or the exception it raised.
+    """
+    conninfo = DatabaseSettings.from_env({"DATABASE_URL": os.environ[URL_ENV]}).conninfo
+    outcomes: list[object] = []
+    with psycopg.connect(conninfo) as owner:
+        owner.execute("SELECT 1 FROM businesses WHERE id = %s FOR UPDATE", (world.ids[0],))
+        owner.execute(
+            "INSERT INTO time_off (business_id, first_day, last_day) VALUES (%s, %s, %s)", (world.ids[0], day, day)
+        )
+        thread = threading.Thread(target=attempt, args=(action, outcomes))
+        thread.start()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            row = owner.execute("SELECT count(*) FROM pg_locks WHERE NOT granted").fetchone()
+            if row is not None and row[0] >= 1:
+                break
+            time.sleep(0.05)
+        else:
+            owner.rollback()
+            thread.join(timeout=20)
+            pytest.fail("The action did not wait for the day off within 20 seconds.")
+        owner.commit()
+    thread.join(timeout=20)
+    assert len(outcomes) == 1
+    return outcomes[0]
+
+
+def test_a_booking_made_while_a_day_off_is_being_added_waits_and_is_refused(world: World) -> None:
+    """The booking waits for the owner's change, then sees the new day off: no booking lands on it uncounted."""
+    day = world.today + timedelta(days=5)
+    outcome = while_a_day_off_is_being_added(
+        world, day, lambda: world.bookings.create_booking(world.slug, request(day))
+    )
+    assert isinstance(outcome, InvalidSlotError), outcome
+    assert live_starts_on(world, day) == []
+
+
+def test_a_move_made_while_a_day_off_is_being_added_waits_and_is_refused(world: World) -> None:
+    """A move onto a day being closed waits for the owner's change and is refused; the booking stays put."""
+    first, closed = world.today + timedelta(days=4), world.today + timedelta(days=6)
+    made = world.bookings.create_booking(world.slug, request(first))
+    token = made.manage_token
+    assert token is not None
+    outcome = while_a_day_off_is_being_added(
+        world, closed, lambda: world.manage.move(world.slug, made.reference, token, closed, "10:00")
+    )
+    assert isinstance(outcome, InvalidSlotError), outcome
+    assert live_starts_on(world, closed) == [] and live_starts_on(world, first) == ["10:00"]
+
+
+def test_a_day_off_and_a_booking_started_together_never_leave_an_uncounted_booking(world: World) -> None:
+    """Twenty rounds of the real add and the real booking for the same day, started together: either the booking
+    is refused, or it committed first and the owner's count includes it. Timing decides which; the two staged
+    tests above are the deterministic ones."""
+    for offset in range(3, 23):
+        day = world.today + timedelta(days=offset)
+        barrier = threading.Barrier(2)
+        added: list[object] = []
+        booked: list[object] = []
+
+        def add(day: date = day, barrier: threading.Barrier = barrier) -> object:
+            """Wait for the booking, then add the day off."""
+            barrier.wait()
+            return world.owners.add_time_off(world.account, world.slug, day, day, None)
+
+        def book(day: date = day, barrier: threading.Barrier = barrier) -> object:
+            """Wait for the owner, then book the day."""
+            barrier.wait()
+            return world.bookings.create_booking(world.slug, request(day))
+
+        threads = [
+            threading.Thread(target=attempt, args=(add, added)),
+            threading.Thread(target=attempt, args=(book, booked)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+        assert isinstance(added[0], tuple), added
+        if isinstance(booked[0], InvalidSlotError):
+            assert added[0][1] == 0 and live_starts_on(world, day) == []
+        else:
+            assert isinstance(booked[0], Confirmation), booked
+            assert added[0][1] == 1 and live_starts_on(world, day) == ["10:00"]
 
 
 def test_removing_a_day_off_brings_its_times_back(world: World) -> None:
