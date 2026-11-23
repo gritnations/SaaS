@@ -209,12 +209,16 @@ def recorded(connection: Connection, versions: Sequence[str]) -> bool:
     return row is not None and row[0] == len(set(versions))
 
 
-def apply(connection: Connection, batch: Sequence[Migration]) -> None:
+def apply(connection: Connection, batch: Sequence[Migration]) -> bool:
     """Run one or more files in a single transaction, and roll it back unless all of them are recorded.
 
     Args:
         connection: An open connection in autocommit mode.
         batch: The files to run together, in order.
+
+    Returns:
+        True if this call applied the batch; False if another run had already applied it while this one waited
+        for the lock.
 
     Raises:
         MigrationError: If a statement fails or a file does not record itself. Nothing from the batch remains.
@@ -224,13 +228,14 @@ def apply(connection: Connection, batch: Sequence[Migration]) -> None:
         with connection.transaction():
             connection.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK_KEY,))
             if ledger_exists(connection) and recorded(connection, [migration.version for migration in batch]):
-                return
+                return False
             for migration in batch:
                 connection.execute(migration.sql())
             if not recorded(connection, [migration.version for migration in batch]):
                 raise MigrationError(f"{names} did not record itself in schema_migrations. Rolled back.")
     except psycopg.Error as error:
         raise MigrationError(f"{names} failed and was rolled back: {type(error).__name__}: {error}") from None
+    return True
 
 
 def plan(connection: Connection, migrations: Sequence[Migration]) -> list[list[Migration]]:
@@ -291,7 +296,7 @@ def run(connection: Connection, directory: Path, status_only: bool = False, out:
         out: Where to write progress. Defaults to standard output.
 
     Returns:
-        How many files were applied (0 with ``status_only``).
+        How many files this run applied (0 with ``status_only``). Files another run applied first are not counted.
 
     Raises:
         MigrationError: If the run is refused or a file fails. Files applied before the failure stay applied.
@@ -309,11 +314,13 @@ def run(connection: Connection, directory: Path, status_only: bool = False, out:
     if not waiting:
         write("Nothing to apply.\n")
         return 0
+    count = 0
     for batch in batches:
-        apply(connection, batch)
+        done_here = apply(connection, batch)
         for migration in batch:
-            write(f"Applied: {migration.path.name}\n")
-    return len(waiting)
+            write(f"{'Applied' if done_here else 'Already applied by another run'}: {migration.path.name}\n")
+        count += len(batch) if done_here else 0
+    return count
 
 
 def main(argv: Sequence[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
