@@ -49,9 +49,9 @@
 
 ## 4. Not verified, and open
 
-- **A live Stripe test event writing the event record.** The `payment_events` table is empty on staging; the writing path is covered only by tests.
-- **The booking page in a browser.** The key's lifetime in the page (kept across a lost reply, dropped after a definite answer) is untested.
-- **The paid path end to end.** A paid booking's checkout, notification and confirmation have not been run together on the deployed system in this review.
+- **A live Stripe test event writing the event record.** Observed on staging on 23 November 2026: one test payment wrote one record. A repeat delivery of a live event was not tried, so ignoring a repeat is still covered only by tests.
+- **The booking page in a browser.** A paid booking was made in a desktop browser on staging on 23 November 2026, and it carried an idempotency key. The key's lifetime in the page (kept across a lost reply, dropped after a definite answer) is untested.
+- **The paid path end to end.** Run once on staging on 23 November 2026, in Stripe test mode: the hold, the checkout, the payment notification and the confirmation, then a move and a customer cancel with a full refund, with the confirmation, move and cancel emails to the customer and the owner. The refund was not checked in the provider's dashboard. A declined card and an expired hold were not run.
 - **Retention.** Event records and idempotency keys have no expiry. Rows grow with use. No retention period is decided.
 - **Ordering.** Out-of-order delivery of provider events is not addressed. The event record recognises repeats, not order.
 - **Subscription notifications.** Not assessed.
