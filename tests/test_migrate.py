@@ -60,6 +60,8 @@ def test_the_repository_files_are_found_in_order_and_none_controls_its_own_trans
         "SELECT 1;\n  ROLLBACK;",
         "SAVEPOINT s;",
         "SELECT 1;\nEND;",
+        "/* a -- b */ COMMIT;",
+        "-- a /* b\nCOMMIT;",
     ],
 )
 def test_a_top_level_transaction_statement_is_found(sql: str) -> None:
@@ -75,6 +77,7 @@ def test_a_top_level_transaction_statement_is_found(sql: str) -> None:
         "-- BEGIN;\nSELECT 1;",
         "/* COMMIT; */\nSELECT 1;",
         "CREATE TABLE commits (ended_at timestamptz);",
+        "COMMENT ON TABLE t IS 'note:\nCOMMIT;';",
     ],
 )
 def test_transaction_words_inside_blocks_comments_or_names_are_ignored(sql: str) -> None:

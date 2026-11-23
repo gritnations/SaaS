@@ -48,11 +48,13 @@ def scratch() -> Iterator[Connection]:
             pytest.skip("The test account cannot create databases.")
     params = conninfo_to_dict(conninfo)
     params["dbname"] = name
-    connection: Connection = psycopg.connect(make_conninfo("", **params), autocommit=True)
     try:
-        yield connection
+        connection: Connection = psycopg.connect(make_conninfo("", **params), autocommit=True)
+        try:
+            yield connection
+        finally:
+            connection.close()
     finally:
-        connection.close()
         with psycopg.connect(conninfo, autocommit=True) as admin:
             admin.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
 

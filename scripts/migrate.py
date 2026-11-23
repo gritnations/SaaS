@@ -48,9 +48,14 @@ LOCK_KEY = 4_729_015
 """Key of the transaction-level advisory lock taken before each transaction. Any fixed number; only this tool uses it."""
 
 FILE_NAME = re.compile(r"([0-9]{4})_[a-z0-9_]+\.sql")
-DOLLAR_QUOTED = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*|)\$.*?\$\1\$", re.DOTALL)
-LINE_COMMENT = re.compile(r"--[^\n]*")
-BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+NOT_CODE = re.compile(
+    r"\$([A-Za-z_][A-Za-z0-9_]*|)\$.*?\$\1\$"  # a dollar-quoted body, such as a DO block
+    r"|/\*.*?\*/"  # a block comment
+    r"|--[^\n]*"  # a line comment
+    r"|'(?:[^']|'')*'",  # a string literal
+    re.DOTALL,
+)
+"""Text that is not top-level SQL. One pattern scanned left to right, so whichever opens first is removed whole."""
 TRANSACTION_CONTROL = re.compile(
     r"^\s*(BEGIN|START\s+TRANSACTION|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b[^;]*;", re.IGNORECASE | re.MULTILINE
 )
@@ -94,9 +99,7 @@ def controls_transaction(sql: str) -> bool:
     Returns:
         True if a top-level BEGIN, START TRANSACTION, COMMIT, END, ROLLBACK, SAVEPOINT or RELEASE is found.
     """
-    stripped = BLOCK_COMMENT.sub(" ", LINE_COMMENT.sub(" ", sql))
-    stripped = DOLLAR_QUOTED.sub(" ", stripped)
-    return TRANSACTION_CONTROL.search(stripped) is not None
+    return TRANSACTION_CONTROL.search(NOT_CODE.sub(" ", sql)) is not None
 
 
 def discover(directory: Path) -> list[Migration]:
