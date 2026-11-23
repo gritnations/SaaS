@@ -270,8 +270,9 @@ def while_a_day_off_is_being_added(world: World, day: date, action: Callable[[],
     """Run an action while a day off is added but not yet committed, as the owner's own transaction does it.
 
     The day off is added with the statements ``OwnerService.add_time_off`` uses: the business row locked for
-    update, then the insert. The action starts in another thread, and the day off is committed only once the
-    action is waiting on a lock, so the overlap does not depend on timing.
+    update, then the insert. The action starts in another thread, and the day off is committed only once another
+    session is waiting on this transaction's locks, so the overlap does not depend on timing. Waits that this
+    transaction does not cause, elsewhere on the server, are not counted.
 
     Args:
         world: The test business.
@@ -292,7 +293,10 @@ def while_a_day_off_is_being_added(world: World, day: date, action: Callable[[],
         thread.start()
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
-            row = owner.execute("SELECT count(*) FROM pg_locks WHERE NOT granted").fetchone()
+            row = owner.execute(
+                "SELECT count(*) FROM pg_stat_activity WHERE %s = ANY(pg_blocking_pids(pid))",
+                (owner.info.backend_pid,),
+            ).fetchone()
             if row is not None and row[0] >= 1:
                 break
             time.sleep(0.05)
