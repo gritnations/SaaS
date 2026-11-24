@@ -8,6 +8,8 @@ Who receives what:
     * ``confirmed``: the customer (details, calendar file, manage link) and the business's contact email.
     * ``cancelled``: the customer, and the business unless the business cancelled it itself.
     * ``moved``: the customer (new time, updated calendar file, manage link) and the business.
+    * ``reminder``: the customer only, about 24 hours before, sent by ``booking.reminders``. It has no manage
+      link, because only the link's hash is stored; it points to the link in the confirmation email.
 
 Every value that came from a person is HTML-escaped before it is placed in an HTML body. The log holds no
 message body and no address.
@@ -18,7 +20,7 @@ import logging
 import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Annotated, Any, get_args
+from typing import Annotated, Any, Literal, get_args
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, StringConstraints
@@ -50,6 +52,9 @@ LOGGER = logging.getLogger(__name__)
 SITE_URL_ENV = "PUBLIC_SITE_URL"
 _SITE_PATTERN = re.compile(SITE_URL_PATTERN)
 KINDS: tuple[str, ...] = get_args(EventKind)
+
+ReminderOutcome = Literal["sent", "skipped", "failed", "dropped"]
+"""What happened to one reminder: see :meth:`Notifier.reminder`."""
 
 
 class NotifyConfigError(RuntimeError):
@@ -357,6 +362,36 @@ def customer_message(context: Context, sender_domain: str = "example.com") -> Me
     )
 
 
+def reminder_message(context: Context) -> Message:
+    """Build the customer's reminder for an upcoming booking.
+
+    Args:
+        context: The booking, loaded as a confirmed booking.
+
+    Returns:
+        The message. It has no manage link and no calendar file: the confirmation email carries both.
+    """
+    rows = [("Service", context.service_name), ("When", when_text(context)), ("Reference", context.reference)]
+    venue = payment_row(context)
+    if venue:
+        rows.append(venue)
+    if context.meeting_link:
+        rows.append(("Meeting link", context.meeting_link))
+    title = "See you soon"
+    intro = f"Hello {context.customer_name}, this is a reminder of your booking with {context.business_name}."
+    footer = (
+        "To move or cancel, use the link in your confirmation email. "
+        f"Questions? Reply to this email to reach {context.business_name}."
+    )
+    return Message(
+        to=context.customer_email,
+        subject=subject_line(f"Reminder: {context.service_name} with {context.business_name}"),
+        html=_page(title, intro, rows, None, footer),
+        text=_text(title, intro, rows, None, footer),
+        reply_to=context.contact_email,
+    )
+
+
 def owner_message(context: Context) -> Message | None:
     """Build the business's email for an event, or ``None`` when none is due.
 
@@ -557,3 +592,43 @@ class Notifier:
                 self._record(business_id, booking_id, kind, role, "failed", "", type(exc).__name__)
                 continue
             self._record(business_id, booking_id, kind, role, "sent", provider_id, "")
+
+    def reminder(self, booking_id: str) -> ReminderOutcome:
+        """Send one booking's reminder to its customer and record the attempt. Never raises.
+
+        Args:
+            booking_id: The booking.
+
+        Returns:
+            ``sent``; ``skipped`` when email is not configured; ``failed`` when the booking could not be read or
+            the provider refused the email, so a later run may try again; or ``dropped`` when the booking is gone
+            or its message cannot be built, so trying again would not help.
+        """
+        try:
+            loaded = self._context("confirmed", booking_id, None)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("reminder context unavailable (%s)", type(exc).__name__)
+            return "failed"
+        if loaded is None:
+            return "dropped"
+        business_id, context = loaded
+        try:
+            message = reminder_message(context)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("reminder message refused (%s)", type(exc).__name__)
+            return "dropped"
+        if self._mailer is None:
+            self._record(business_id, booking_id, "reminder", "customer", "skipped", "", "email not configured")
+            return "skipped"
+        try:
+            provider_id = self._mailer.send(message)
+        except MailError as exc:
+            LOGGER.warning("reminder email failed: %s", exc)
+            self._record(business_id, booking_id, "reminder", "customer", "failed", "", str(exc))
+            return "failed"
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("reminder email failed (%s)", type(exc).__name__)
+            self._record(business_id, booking_id, "reminder", "customer", "failed", "", type(exc).__name__)
+            return "failed"
+        self._record(business_id, booking_id, "reminder", "customer", "sent", provider_id, "")
+        return "sent"

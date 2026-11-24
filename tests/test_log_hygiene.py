@@ -25,6 +25,7 @@ FORBIDDEN = re.compile(
 REVIEWED_EXCEPTION_TEXT = {
     ("api/main.py", "database is not configured: %s"),
     ("booking/notify.py", "email to %s failed: %s"),
+    ("booking/notify.py", "reminder email failed: %s"),
 }
 """Calls that log an exception's own text. Each was read and its message is fixed text that holds no secret:
 ``DatabaseConfigError`` names only an environment variable, and ``MailError`` names only an HTTP status or an
