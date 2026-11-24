@@ -235,10 +235,14 @@ export function buttonStyle(look, contrast) {
  * @param {{href: string, text: string, look: object, contrast: (a: string, b: string) => number}} parts The booking
  *   page address, one of the fixed button texts, the look, and the contrast function.
  * @returns {string} The HTML.
- * @throws {Error} If the text is not one of the fixed texts, or the look cannot be used.
+ * @throws {Error} If the text is not one of the fixed texts, the address is not an absolute http or https address
+ *   (so a `javascript:` or `data:` address can never reach the code), or the look cannot be used.
  */
 export function buttonSnippet({ href, text, look, contrast }) {
   if (!BUTTON_TEXTS.includes(text)) throw new Error("That button text is not one of the choices.");
+  if (typeof href !== "string" || !/^https?:\/\/\S+$/i.test(href)) {
+    throw new Error("That booking page address is not a web address.");
+  }
   const { background, color, borderRadius } = buttonStyle(look, contrast);
   const style = `display:inline-block;padding:12px 22px;border-radius:${borderRadius};background:${background};color:${color};text-decoration:none;font-weight:600`;
   return `<a href="${escapeHtml(href)}"\n   target="_blank" rel="noopener"\n   style="${style}">\n  ${escapeHtml(text)}\n</a>`;

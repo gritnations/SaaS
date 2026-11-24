@@ -183,6 +183,38 @@ test("only the fixed button texts and checked colours are accepted", () => {
   }
 });
 
+test("only an absolute http or https address is accepted, so no script address can reach the code", () => {
+  for (const href of [
+    "javascript:alert(1)",
+    "JaVaScRiPt:alert(1)",
+    " javascript:alert(1)",
+    "\u0009javascript:alert(1)",
+    "\njavascript:alert(1)",
+    "data:text/html,<b>x</b>",
+    "vbscript:x",
+    "//evil.example/book/x",
+    "/book/x",
+    "book.example.com/book/x",
+    "https://",
+    "https://book.example.com/a b",
+    "",
+    null,
+    42,
+    ["https://book.example.com/book/x"],
+    { toString: () => "https://book.example.com/book/x" },
+  ]) {
+    assert.throws(() => snippetFor(STANDARD, "Book now", href), /not a web address/, String(href));
+  }
+  assert.throws(() => buttonSnippet({ text: "Book now", look: STANDARD, contrast }), /not a web address/);
+  for (const href of [
+    "https://book.example.com/book/x",
+    "http://localhost:8000/book/x",
+    "HTTPS://BOOK.EXAMPLE.COM/book/x",
+  ]) {
+    assert.ok(snippetFor(STANDARD, "Book now", href).startsWith(`<a href="${href}"`), href);
+  }
+});
+
 test("the address is escaped, so it cannot break out of its attribute", () => {
   const snippet = snippetFor(STANDARD, "Book now", 'https://book.example.com/book/x?a=1&b="2"><script>');
   assert.ok(snippet.includes('href="https://book.example.com/book/x?a=1&amp;b=&quot;2&quot;&gt;&lt;script&gt;"'));
