@@ -191,14 +191,31 @@ export function contactBlock(business) {
 }
 
 /**
- * Show the business in the page header and title.
+ * Show the business in the page header and title, and let the page show itself.
  * @param {string} name The business name.
  * @param {string} title The document title.
+ * @param {string|null} [logo] The address of the business's logo, if it has one. The logo replaces the letter badge
+ *   and the visible name. The name stays in the page for screen readers, and comes back if the logo cannot load.
  */
-export function showBusiness(name, title) {
+export function showBusiness(name, title, logo = null) {
   document.title = title;
+  document.documentElement.classList.remove("look-pending");
   const badge = document.getElementById("badge");
   const heading = document.getElementById("business-name");
-  if (badge) badge.textContent = (name.trim()[0] || "?").toUpperCase();
+  const letter = (name.trim()[0] || "?").toUpperCase();
   if (heading) heading.textContent = name;
+  if (!badge) return;
+  if (!logo) {
+    badge.textContent = letter;
+    return;
+  }
+  const image = el("img", { src: logo, alt: "" });
+  image.addEventListener("error", () => {
+    badge.classList.remove("has-logo");
+    badge.textContent = letter;
+    if (heading) heading.classList.remove("visually-hidden");
+  });
+  badge.classList.add("has-logo");
+  badge.replaceChildren(image);
+  if (heading) heading.classList.add("visually-hidden");
 }

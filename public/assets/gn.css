@@ -22,6 +22,51 @@
   --muted: rgba(255, 255, 255, 0.82);
   --radius: 8px;
   --radius-lg: 16px;
+
+  /* Roles. Each defaults to the colour the page has always used. A business look overrides only these. */
+  --page-bg: var(--ink);
+  --glow:
+    radial-gradient(ellipse 80% 420px at 50% -140px, rgba(19, 53, 90, 1), transparent),
+    radial-gradient(ellipse 50% 320px at 100% 0, rgba(56, 86, 66, 0.35), transparent);
+  --font: "Montserrat", Helvetica, Arial, sans-serif;
+  --radius-btn: 10px;
+  --action: var(--red);
+  --action-hover: var(--red-hover);
+  --on-action: #ffffff;
+  --action-glow: rgba(214, 44, 45, 0.6);
+  --action-glow-soft: rgba(214, 44, 45, 0.3);
+  --select: var(--mint);
+  --on-select: var(--navy);
+  --on-select-sub: var(--green);
+  --link: var(--amber);
+  --link-hover: var(--mint);
+  --focus: var(--amber);
+  --focus-glow: rgba(237, 251, 237, 0.25);
+  --edge: rgba(255, 255, 255, 0.1);
+  --edge-strong: rgba(255, 255, 255, 0.24);
+  --edge-ghost: rgba(255, 255, 255, 0.3);
+  --edge-faint: rgba(255, 255, 255, 0.05);
+  --disabled-fg: rgba(255, 255, 255, 0.45);
+  --input-bg: rgba(0, 0, 0, 0.25);
+  --card-bg: #ffffff;
+  --card-fg: var(--navy);
+  --card-sub: var(--green);
+  --card-warn: var(--red);
+  --notice-bg: rgba(19, 53, 90, 0.6);
+  --tick-glow: rgba(237, 251, 237, 0.12);
+}
+
+/* Held back until a business look is known, so a branded page never flashes the standard colours first. If the
+   script never answers, the page shows itself after two seconds. */
+html.look-pending body {
+  opacity: 0;
+  animation: look-reveal 0s 2s forwards;
+}
+
+@keyframes look-reveal {
+  to {
+    opacity: 1;
+  }
 }
 
 * {
@@ -38,22 +83,20 @@ body {
   display: flex;
   flex-direction: column;
   color: var(--text);
-  font-family: "Montserrat", Helvetica, Arial, sans-serif;
+  font-family: var(--font);
   font-size: 16px;
   line-height: 1.6;
-  background-color: var(--ink);
-  background-image:
-    radial-gradient(ellipse 80% 420px at 50% -140px, rgba(19, 53, 90, 1), transparent),
-    radial-gradient(ellipse 50% 320px at 100% 0, rgba(56, 86, 66, 0.35), transparent);
+  background-color: var(--page-bg);
+  background-image: var(--glow);
   background-repeat: no-repeat;
 }
 
 a {
-  color: var(--amber);
+  color: var(--link);
 }
 
 a:hover {
-  color: var(--mint);
+  color: var(--link-hover);
 }
 
 button,
@@ -63,7 +106,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 3px solid var(--amber);
+  outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
 
@@ -98,13 +141,26 @@ textarea {
   height: 44px;
   flex: 0 0 auto;
   border-radius: var(--radius);
-  background: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  color: var(--on-select);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
   font-size: 19px;
+}
+
+/* A business logo replaces the letter badge. */
+.top .badge.has-logo {
+  width: auto;
+  max-width: 160px;
+  background: transparent;
+}
+
+.top .badge img {
+  display: block;
+  max-width: 160px;
+  max-height: 44px;
 }
 
 .top h1 {
@@ -148,7 +204,7 @@ textarea {
 }
 
 .foot strong span {
-  color: var(--amber);
+  color: var(--link);
 }
 
 @media (min-width: 900px) {
@@ -173,7 +229,7 @@ h2 {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--amber);
+  color: var(--link);
 }
 
 .muted {
@@ -210,11 +266,11 @@ h2 {
   content: "";
   height: 4px;
   border-radius: 100px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--edge);
 }
 
 .steps li.lit::before {
-  background: var(--mint);
+  background: var(--select);
 }
 
 /* Panels and choices */
@@ -247,7 +303,7 @@ h2 {
   text-align: left;
   color: var(--text);
   background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition:
@@ -256,13 +312,13 @@ h2 {
 }
 
 .choice:hover {
-  border-color: rgba(255, 255, 255, 0.24);
+  border-color: var(--edge-strong);
 }
 
 .choice[aria-pressed="true"] {
-  background: var(--mint);
-  border-color: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  border-color: var(--select);
+  color: var(--on-select);
 }
 
 .choice .grow {
@@ -278,7 +334,7 @@ h2 {
 }
 
 .choice[aria-pressed="true"] .meta {
-  color: var(--green);
+  color: var(--on-select-sub);
 }
 
 .choice .price {
@@ -290,9 +346,9 @@ h2 {
   height: 36px;
   padding: 0 12px;
   border-radius: 100px;
-  border: 1px solid var(--amber);
+  border: 1px solid var(--link);
   background: transparent;
-  color: var(--amber);
+  color: var(--link);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -328,7 +384,7 @@ h2 {
   align-items: center;
   padding: 9px 0;
   border-radius: var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--edge);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -353,13 +409,13 @@ h2 {
 }
 
 .date[aria-pressed="true"] {
-  background: var(--mint);
-  border-color: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  border-color: var(--select);
+  color: var(--on-select);
 }
 
 .date[aria-pressed="true"] .mon {
-  color: var(--green);
+  color: var(--on-select-sub);
 }
 
 .date.more {
@@ -367,7 +423,7 @@ h2 {
   justify-content: center;
   font-size: 12px;
   font-weight: 700;
-  color: var(--amber);
+  color: var(--link);
   border-style: dashed;
 }
 
@@ -387,7 +443,7 @@ h2 {
 .time {
   height: 48px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--edge);
   background: var(--panel);
   color: var(--text);
   font-size: 16px;
@@ -397,16 +453,16 @@ h2 {
 
 .time:disabled {
   cursor: not-allowed;
-  color: rgba(255, 255, 255, 0.45);
-  border-color: rgba(255, 255, 255, 0.05);
+  color: var(--disabled-fg);
+  border-color: var(--edge-faint);
   background: transparent;
   text-decoration: line-through;
 }
 
 .time[aria-pressed="true"] {
-  background: var(--mint);
-  border-color: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  border-color: var(--select);
+  color: var(--on-select);
   font-weight: 800;
 }
 
@@ -427,7 +483,7 @@ h2 {
   padding: 12px 14px;
   border-radius: var(--radius);
   border: 1px solid var(--line-strong);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--input-bg);
   color: var(--text);
   font-size: 16px;
   font-weight: 500;
@@ -441,18 +497,18 @@ h2 {
 .field input:focus,
 .field textarea:focus {
   outline: none;
-  border-color: var(--mint);
-  box-shadow: 0 0 0 3px rgba(237, 251, 237, 0.25);
+  border-color: var(--select);
+  box-shadow: 0 0 0 3px var(--focus-glow);
 }
 
 .field input[aria-invalid="true"] {
-  border-color: var(--amber);
+  border-color: var(--link);
 }
 
 .error {
   font-size: 13px;
   font-weight: 600;
-  color: var(--amber);
+  color: var(--link);
 }
 
 fieldset {
@@ -477,10 +533,10 @@ legend {
   gap: 8px;
   min-height: 52px;
   padding: 0 20px;
-  border-radius: 10px;
+  border-radius: var(--radius-btn);
   border: 0;
-  background: var(--red);
-  color: #ffffff;
+  background: var(--action);
+  color: var(--on-action);
   font-size: 15px;
   font-weight: 600;
   text-decoration: none;
@@ -491,11 +547,11 @@ legend {
 }
 
 .btn:hover {
-  background: var(--red-hover);
-  color: #ffffff;
+  background: var(--action-hover);
+  color: var(--on-action);
   box-shadow:
-    0 0 0 1px rgba(214, 44, 45, 0.6),
-    0 8px 24px rgba(214, 44, 45, 0.3);
+    0 0 0 1px var(--action-glow),
+    0 8px 24px var(--action-glow-soft);
 }
 
 .btn:disabled {
@@ -510,7 +566,7 @@ legend {
 }
 
 .btn.ghost:hover {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: var(--edge-ghost);
   box-shadow: none;
 }
 
@@ -532,8 +588,8 @@ legend {
 /* Summary */
 
 .summary {
-  background: #ffffff;
-  color: var(--navy);
+  background: var(--card-bg);
+  color: var(--card-fg);
   border-radius: var(--radius-lg);
   padding: 16px;
   display: grid;
@@ -555,7 +611,7 @@ legend {
 
 .summary .line .label {
   font-size: 12px;
-  color: var(--green);
+  color: var(--card-sub);
   font-weight: 600;
 }
 
@@ -567,7 +623,7 @@ legend {
 .summary .link-btn {
   border: 0;
   background: transparent;
-  color: var(--navy);
+  color: var(--card-fg);
   font-size: 13px;
   font-weight: 700;
   text-decoration: underline;
@@ -578,7 +634,7 @@ legend {
 .summary .hint {
   font-size: 13px;
   font-weight: 600;
-  color: var(--red);
+  color: var(--card-warn);
   text-align: center;
 }
 
@@ -604,13 +660,13 @@ legend {
 .notice {
   border-radius: var(--radius-lg);
   border: 1px solid var(--line-strong);
-  background: rgba(19, 53, 90, 0.6);
+  background: var(--notice-bg);
   padding: 14px 16px;
   font-size: 14px;
 }
 
 .notice.warn {
-  border-color: var(--amber);
+  border-color: var(--link);
 }
 
 .done {
@@ -623,14 +679,14 @@ legend {
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  background: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  color: var(--on-select);
   font-size: 28px;
   font-weight: 800;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 0 8px rgba(237, 251, 237, 0.12);
+  box-shadow: 0 0 0 8px var(--tick-glow);
 }
 
 .done h2 {
@@ -654,8 +710,8 @@ legend {
   border-radius: 100px;
   font-size: 12px;
   font-weight: 700;
-  background: var(--mint);
-  color: var(--navy);
+  background: var(--select);
+  color: var(--on-select);
 }
 
 .status-chip.off {
