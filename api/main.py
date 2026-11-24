@@ -10,6 +10,9 @@ Routes:
     * ``/businesses/{business}/...``: public booking routes, defined in ``api.booking``.
     * ``/owner/...``: signed-in owner routes, defined in ``api.owner``.
     * ``/businesses/{business}/bookings/{reference}/...``: manage-link routes, defined in ``api.manage``.
+    * ``POST /internal/reminders/run``: sends the reminder emails that are due. Called by a clock outside the
+      API with ``Authorization: Bearer <REMINDERS_TOKEN>``. It answers 404 and does nothing when that token is
+      not set. Like ``/metrics``, it is still listed in the development OpenAPI document.
 
 This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
 ``postgres`` for the database, to ``payments`` for providers and to ``booking`` for bookings.
@@ -26,6 +29,7 @@ Environment variables read:
       services can be booked only when both and ``PUBLIC_SITE_URL`` are set.
     * ``STRIPE_BILLING_WEBHOOK_SECRET``: read by ``payments.stripe``. A secret. Paid plans can be chosen only
       when it is set as well.
+    * ``REMINDERS_TOKEN``: the bearer token the clock sends to run reminders. A secret, at least 32 characters.
 
 Constraints:
     * Importing this module and calling :func:`create_api` perform no network I/O.
@@ -54,6 +58,7 @@ from booking.manage import ManageService
 from booking.notify import SITE_URL_ENV, Notifier, site_url_from_environment
 from booking.owner import OwnerService
 from booking.payments import PaymentsBackend, PaymentService
+from booking.reminders import ReminderService, RunResult
 from booking.service import BookingBackend, BookingService
 from mail import mailer_from_environment, sender_domain
 from payments.base import (
@@ -77,6 +82,7 @@ LOGGER = logging.getLogger(__name__)
 API_VERSION = "0.1.0"
 APP_ENV_VAR = "APP_ENV"
 METRICS_TOKEN_ENV = "METRICS_TOKEN"
+REMINDERS_TOKEN_ENV = "REMINDERS_TOKEN"
 ENVIRONMENTS = ("production", "development", "test")
 MIN_METRICS_TOKEN_LENGTH = 32
 METRICS_MEDIA_TYPE = "text/plain; version=0.0.4; charset=utf-8"
@@ -102,6 +108,18 @@ class ReadinessProbe(Protocol):
 
     def close(self) -> None:
         """Release the dependency's resources."""
+        ...
+
+
+class ReminderBackend(Protocol):
+    """What the reminder route needs: a way to send the reminders that are due."""
+
+    def run(self) -> RunResult:
+        """Send the reminders that are due now.
+
+        Returns:
+            Counts of what the run did.
+        """
         ...
 
 
@@ -181,11 +199,12 @@ def resolve_environment(environ: Mapping[str, str]) -> str:
     return value
 
 
-def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
-    """Read and validate ``METRICS_TOKEN``.
+def resolve_metrics_token(environ: Mapping[str, str], name: str = METRICS_TOKEN_ENV) -> str | None:
+    """Read and validate a bearer token, by default ``METRICS_TOKEN``.
 
     Args:
         environ: The mapping to read.
+        name: The variable to read.
 
     Returns:
         The token with surrounding whitespace removed, or ``None`` if absent or blank.
@@ -193,12 +212,26 @@ def resolve_metrics_token(environ: Mapping[str, str]) -> str | None:
     Raises:
         ApiConfigError: If a nonblank token is shorter than 32 characters after trimming.
     """
-    token = environ.get(METRICS_TOKEN_ENV, "").strip()
+    token = environ.get(name, "").strip()
     if not token:
         return None
     if len(token) < MIN_METRICS_TOKEN_LENGTH:
-        raise ApiConfigError(f"{METRICS_TOKEN_ENV} must be at least {MIN_METRICS_TOKEN_LENGTH} characters.")
+        raise ApiConfigError(f"{name} must be at least {MIN_METRICS_TOKEN_LENGTH} characters.")
     return token
+
+
+def bearer_matches(authorization: str | None, token: str) -> bool:
+    """Compare a request's bearer token with the expected one in constant time.
+
+    Args:
+        authorization: The ``Authorization`` request header, if any.
+        token: The expected token.
+
+    Returns:
+        ``True`` only when the header is ``Bearer <token>``.
+    """
+    supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
+    return hmac.compare_digest(supplied.encode(), token.encode())
 
 
 def build_registry(environment: str, extra: list[PaymentProvider] | None = None) -> PaymentRegistry:
@@ -247,6 +280,7 @@ def create_api(
     manage: manage_routes.ManageBackend | None = None,
     payments: PaymentsBackend | None = None,
     billing: BillingBackend | None = None,
+    reminders: ReminderBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -263,15 +297,17 @@ def create_api(
             ``PUBLIC_SITE_URL`` on a real database; without them online payments are not offered.
         billing: The plan billing service. ``None`` means build it the same way, when the billing webhook
             secret is also set; without it paid plans are not offered.
+        reminders: The reminder service. ``None`` means build it on a real database. The route exists only
+            when ``REMINDERS_TOKEN`` is set.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
         ``app.state.database`` so that the root application can close it at shutdown.
 
     Raises:
-        ApiConfigError: If ``APP_ENV`` or ``METRICS_TOKEN`` is invalid, or ``BOOKING_PAGES_URL`` is set without
-            ``PUBLIC_SITE_URL``: payment notifications are recorded only when ``PUBLIC_SITE_URL`` is set, so
-            customers could otherwise pay for bookings that are never confirmed.
+        ApiConfigError: If ``APP_ENV``, ``METRICS_TOKEN`` or ``REMINDERS_TOKEN`` is invalid, or
+            ``BOOKING_PAGES_URL`` is set without ``PUBLIC_SITE_URL``: payment notifications are recorded only when
+            ``PUBLIC_SITE_URL`` is set, so customers could otherwise pay for bookings that are never confirmed.
         booking.notify.NotifyConfigError: If ``BOOKING_PAGES_URL`` is set and ``PUBLIC_SITE_URL`` is not an
             ``https://`` URL.
         api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
@@ -282,6 +318,7 @@ def create_api(
     env = os.environ if environ is None else environ
     environment = resolve_environment(env)
     metrics_token = resolve_metrics_token(env)
+    reminders_token = resolve_metrics_token(env, REMINDERS_TOKEN_ENV)
     if env.get(PAGES_URL_ENV, "").strip() and site_url_from_environment(env) is None:
         raise ApiConfigError(f"{PAGES_URL_ENV} needs {SITE_URL_ENV} to be set as well.")
     stripe_provider = stripe_from_environment(env)
@@ -314,6 +351,8 @@ def create_api(
             owners = OwnerService(probe, notifier=notifier, refunds=refunds)
         if manage is None:
             manage = ManageService(probe, notifier=notifier, refunds=refunds)
+        if reminders is None:
+            reminders = ReminderService(probe, notifier)
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
@@ -427,14 +466,38 @@ def create_api(
         if environment == "production":
             if metrics_token is None:
                 raise HTTPException(status_code=404, detail="Not Found")
-            supplied = authorization[7:] if authorization and authorization.startswith("Bearer ") else ""
-            if not hmac.compare_digest(supplied.encode(), metrics_token.encode()):
+            if not bearer_matches(authorization, metrics_token):
                 raise HTTPException(
                     status_code=401,
                     detail="Unauthorized",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
         return PlainTextResponse(metrics.render(), media_type=METRICS_MEDIA_TYPE)
+
+    @api.post("/internal/reminders/run", response_model=RunResult)
+    def run_reminders(authorization: Annotated[str | None, Header()] = None) -> RunResult:
+        """Send the reminder emails that are due.
+
+        Args:
+            authorization: The ``Authorization`` request header, if any.
+
+        Returns:
+            Counts of what the run did.
+
+        Raises:
+            HTTPException: 404 when ``REMINDERS_TOKEN`` is not set. 401 when the token is missing or wrong.
+                503 when there is no database, or it cannot be reached.
+        """
+        if reminders_token is None:
+            raise HTTPException(status_code=404, detail="Not Found")
+        if not bearer_matches(authorization, reminders_token):
+            raise HTTPException(status_code=401, detail="Unauthorized", headers={"WWW-Authenticate": "Bearer"})
+        if reminders is None:
+            raise HTTPException(status_code=503, detail="Try again later.")
+        try:
+            return reminders.run()
+        except DatabaseUnavailableError:
+            raise HTTPException(status_code=503, detail="Try again later.") from None
 
     @api.post("/payments/{provider}/checkout", response_model=CheckoutOut)
     def checkout(provider: ProviderName, body: CheckoutBody) -> CheckoutOut:

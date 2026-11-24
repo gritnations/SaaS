@@ -283,7 +283,7 @@ class ManageService:
                 gap = timedelta(minutes=normalize_break(current.business.break_minutes))
                 connection.execute(
                     "UPDATE bookings SET starts_at = %s, ends_at = %s, blocked_until = %s, "
-                    "move_count = move_count + 1 WHERE id = %s",
+                    "move_count = move_count + 1, moved_at = now(), reminder_attempts = 0 WHERE id = %s",
                     (slot.starts_at, slot.ends_at, slot.ends_at + gap, loaded.booking_id),
                 )
                 after = self._load(connection, slug, reference, token, lock=False).managed
