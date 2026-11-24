@@ -6,7 +6,9 @@ hard-to-read look is named as such; button text picks the more readable of white
 included on paid plans and during the trial only; and only PNG, JPEG and WebP bytes are recognised as images.
 """
 
+import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -83,6 +85,32 @@ def test_button_text_is_the_more_readable_of_white_and_near_black() -> None:
 def test_the_default_look_is_readable() -> None:
     """The look shown when nothing is published passes its own rules."""
     assert readability_problems(DEFAULT_LOOK) == []
+
+
+def test_the_default_look_is_the_customer_pages_own_colours() -> None:
+    """A business with no look already has the stylesheet's colours, so the default must be exactly those.
+
+    Otherwise the editor's starting point, its Reset and the fallback when branding ends would not match the page.
+    """
+    css = (Path(__file__).resolve().parent.parent / "public" / "assets" / "gn.css").read_text(encoding="utf-8")
+
+    def colour(name: str) -> str:
+        """Read one ``--name: #rrggbb;`` custom property from the stylesheet.
+
+        Args:
+            name: The property name without the leading dashes.
+
+        Returns:
+            Its colour.
+        """
+        found = re.search(rf"^\s*--{name}:\s*(#[0-9a-f]{{6}});", css, re.MULTILINE)
+        assert found is not None, name
+        return found.group(1)
+
+    assert DEFAULT_LOOK.accent == colour("red")
+    assert DEFAULT_LOOK.background == colour("ink")
+    assert DEFAULT_LOOK.text == colour("text")
+    assert (DEFAULT_LOOK.font, DEFAULT_LOOK.corners) == ("modern", "soft")
 
 
 def test_each_readability_problem_is_named() -> None:

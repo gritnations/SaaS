@@ -16,6 +16,7 @@ const MENU = [
   ["services", "Services", "/app/services/"],
   ["hours", "Opening hours", "/app/hours/"],
   ["payments", "Payments", "/app/payments/"],
+  ["look", "Booking page", "/app/look/"],
   ["settings", "Settings", "/app/settings/"],
 ];
 
@@ -23,7 +24,7 @@ const MENU = [
 const PHONE_MENU = ["today", "bookings", "services", "settings"];
 
 /** The pages the More tab stands for: it shows as current on each of them. */
-const MORE_PAGES = ["more", "hours", "payments", "plan"];
+const MORE_PAGES = ["more", "hours", "payments", "look", "plan"];
 
 let session = null;
 
@@ -73,17 +74,21 @@ async function renew() {
 }
 
 /**
- * Call the owner API, renewing the session once if it has expired. A non-GET call always sends a JSON body,
- * because the API's host refuses a body-less POST.
+ * Call the owner API, renewing the session once if it has expired. A non-GET call always sends a body, because the
+ * API's host refuses a body-less POST: JSON by default, or the raw bytes of a file when `raw` is given.
  * @param {string} path The path after /owner.
- * @param {{method?: string, body?: object}} [options] The method and JSON body.
+ * @param {{method?: string, body?: object, raw?: {type: string, body: ArrayBuffer}}} [options] The method, and
+ *   either a JSON body or a file's content type and bytes.
  * @returns {Promise<{status: number, data: any}>} The answer. status 0 means no answer.
  */
 export async function owner(path, options = {}) {
   const method = options.method || "GET";
   const call = async () => {
     const init = { method, headers: { Authorization: `Bearer ${session.access}` } };
-    if (method !== "GET") {
+    if (options.raw) {
+      init.headers["Content-Type"] = options.raw.type;
+      init.body = options.raw.body;
+    } else if (method !== "GET") {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(options.body || {});
     }
