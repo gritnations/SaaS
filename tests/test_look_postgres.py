@@ -1,7 +1,7 @@
 """Tests for booking page looks and logos against a real PostgreSQL database.
 
 Skipped unless ``BOOKING_TEST_DATABASE_URL`` is set. The database must have every migration applied, including
-``0021_booking_look.sql``. Each test creates its own businesses with random slugs and deletes everything it created.
+``0021_booking_look.sql`` and ``0022_logo_size.sql``. Each test creates its own businesses with random slugs and deletes everything it created.
 
 What these tests establish: a draft is private until published; publishing needs a draft, a plan or trial that
 includes branding, and a readable look; customers see the published look only while branding is included and the

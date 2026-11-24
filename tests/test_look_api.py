@@ -15,10 +15,10 @@ from helpers import ORIGIN, TRUSTED_HOST, FakeDatabase
 from test_owner_api import ACCOUNT, GOOD, FakeOwners, FakeVerifier
 
 from api.main import create_api
-from booking.look import Logo, Look, LookState
+from booking.look import LOGO_MAX_BYTES, Logo, Look, LookState
 from booking.owner import InvalidChangeError
 from booking.service import NotFoundError
-from main import create_app
+from main import LOGO_UPLOAD_MAX_BODY_BYTES, create_app
 from postgres import DatabaseUnavailableError
 
 OWNER = "/owner/businesses/example/look"
@@ -256,14 +256,26 @@ def test_a_logo_upload_passes_its_bytes_and_declared_type() -> None:
     assert looks.calls == [("upload_logo", (ACCOUNT, "example", "image/png", PNG))]
 
 
-def test_a_logo_over_the_body_limit_never_reaches_the_service() -> None:
-    """The ingress boundary refuses a declared length above its limit with 413."""
+def test_a_logo_over_the_logo_route_limit_never_reaches_the_service() -> None:
+    """The ingress boundary refuses a declared length above the logo route's own limit with 413."""
     looks = FakeLooks()
     response = client(looks).post(
-        f"{OWNER}/logo", headers={**GOOD, "Content-Type": "image/png"}, content=PNG + b"\x00" * 70_000
+        f"{OWNER}/logo",
+        headers={**GOOD, "Content-Type": "image/png"},
+        content=PNG + bytes(LOGO_UPLOAD_MAX_BODY_BYTES - len(PNG) + 1),
     )
     assert response.status_code == 413
     assert looks.calls == []
+
+
+def test_a_logo_of_the_largest_size_reaches_the_service() -> None:
+    """A logo of exactly the logo limit, well over the 64 KB every other route allows, is passed on in full."""
+    looks = FakeLooks()
+    content = PNG + bytes(LOGO_MAX_BYTES - len(PNG))
+    response = client(looks).post(f"{OWNER}/logo", headers={**GOOD, "Content-Type": "image/png"}, content=content)
+    assert response.status_code == 201
+    assert looks.calls == [("upload_logo", (ACCOUNT, "example", "image/png", content))]
+    assert len(content) == LOGO_MAX_BYTES > 65_536
 
 
 @pytest.mark.parametrize(

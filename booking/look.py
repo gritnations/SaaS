@@ -28,8 +28,9 @@ from booking.service import PAID_PLANS, NotFoundError
 from contracts import STRICT
 from postgres import Database
 
-LOGO_MAX_BYTES = 61_440
-"""The largest logo accepted, in bytes. It stays under the API's request body limit."""
+LOGO_MAX_BYTES = 102_400
+"""The largest logo accepted, in bytes (100 KB). The API takes a body this large on the logo upload route only
+(``main.LOGO_UPLOAD_MAX_BODY_BYTES``), and the database checks the same number (migration 0022)."""
 
 LOGO_TYPES = ("image/png", "image/jpeg", "image/webp")
 """The logo formats accepted."""

@@ -141,7 +141,10 @@ test("a logo file is checked before it is sent", () => {
   assert.match(logoProblem({ type: "application/pdf", size: 1000 }), /isn't allowed/);
   assert.match(logoProblem({ type: "image/gif", size: 1000 }), /isn't allowed/);
   assert.match(logoProblem({ type: "image/png", size: 0 }), /empty/);
-  assert.match(logoProblem({ type: "image/png", size: LOGO_MAX_BYTES + 1 }), /The limit is 60 KB/);
+  assert.match(logoProblem({ type: "image/png", size: LOGO_MAX_BYTES + 1 }), /The limit is 100 KB/);
+  // 60 KB was the old limit: a logo of that size is now fine, and 100 KB is the exact edge.
+  assert.equal(logoProblem({ type: "image/png", size: 61441 }), "");
+  assert.equal(LOGO_MAX_BYTES, 100 * 1024);
 });
 
 const HREF = "https://book.example.com/book/example-barbershop";
