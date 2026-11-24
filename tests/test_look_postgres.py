@@ -7,13 +7,16 @@ What these tests establish: a draft is private until published; publishing needs
 includes branding, and a readable look; customers see the published look only while branding is included and the
 default look otherwise; saving or publishing the same thing twice changes nothing more; reset goes back to the
 default; a logo must be an accepted image whose bytes match its type, is served only under its own business, and
-cannot be used by another business; logos no look uses are removed; the database refuses values outside the fixed
+cannot be used by another business; logos no look uses are removed, but never one that a change to the same business
+still in progress has put in a look; a business that no longer exists has no branding; the database refuses values outside the fixed
 sets even if the application were bypassed; another account cannot see or change the look; and everything works
 with only the API role's privileges.
 """
 
 import os
 import secrets
+import threading
+import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -254,6 +257,51 @@ def test_logos_no_look_uses_are_removed(shop: Shop) -> None:
         looks.logo(shop.slug, first)
     looks.save_draft(shop.account, shop.slug, MIDNIGHT)
     assert logo_count(shop) == 1
+
+
+def test_a_change_waits_for_another_change_to_the_same_business(shop: Shop) -> None:
+    """A second change runs after an unfinished one, so its clean-up never strips a logo from a look.
+
+    The unfinished change is played by a second connection that holds the business's row, as every look change
+    does, and publishes a look using a logo nothing uses yet. A reset started meanwhile must wait for it and then
+    remove both the look and the logo. Without the wait, the reset's clean-up would delete the logo first and leave
+    the new published look without it. Reset is used because nothing else in it waits on the business's row.
+    """
+    looks = LookService(shop.database)
+    logo = looks.upload_logo(shop.account, shop.slug, "image/png", PNG)
+    outcome: dict[str, object] = {}
+
+    def reset() -> None:
+        """Reset the look, which removes the logos no look uses."""
+        try:
+            outcome["state"] = looks.reset(shop.account, shop.slug)
+        except Exception as error:  # noqa: BLE001 - reported to the test below
+            outcome["error"] = error
+
+    settings = DatabaseSettings.from_env({"DATABASE_URL": os.environ[URL_ENV]})
+    with psycopg.connect(settings.conninfo) as other:
+        other.execute("SELECT 1 FROM businesses WHERE id = %s FOR UPDATE", (shop.ids[0],))
+        other.execute(
+            "INSERT INTO booking_looks (business_id, state, accent, background, text_colour, font, corners, logo_id) "
+            "VALUES (%s, 'published', '#e0aa55', '#0c1726', '#f3f5f8', 'classic', 'round', %s)",
+            (shop.ids[0], logo),
+        )
+        second = threading.Thread(target=reset)
+        second.start()
+        time.sleep(1.0)
+        assert second.is_alive(), "the reset did not wait for the unfinished change"
+        other.commit()
+    second.join(timeout=10)
+    assert not second.is_alive() and "error" not in outcome
+    assert looks.public_look(shop.slug) is None
+    assert logo_count(shop) == 0
+
+
+def test_a_business_that_no_longer_exists_has_no_branding(shop: Shop) -> None:
+    """The plan check answers ``False`` rather than failing when the business row is gone."""
+    looks = LookService(shop.database)
+    with shop.database.connection() as connection:
+        assert looks._allowed(connection, str(uuid.uuid4())) is False
 
 
 def test_another_account_cannot_see_or_change_the_look(shop: Shop) -> None:

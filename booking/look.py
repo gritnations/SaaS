@@ -227,12 +227,26 @@ class LookService:
             business_id: The business's identifier.
 
         Returns:
-            Whether branding is included.
+            Whether branding is included; ``False`` if the business no longer exists.
         """
         row: Any = connection.execute(
             "SELECT plan, trial_ends_at FROM businesses WHERE id = %s", (business_id,)
         ).fetchone()
+        if row is None:
+            return False
         return branding_allowed(row[0], row[1], self._clock())
+
+    @staticmethod
+    def _lock(connection: psycopg.Connection[Any], business_id: str) -> None:
+        """Hold the business's row until the transaction ends, so its look changes run one at a time.
+
+        Without this, one change could remove a logo that another change, not yet committed, has just put in a look.
+
+        Args:
+            connection: An open connection.
+            business_id: The business's identifier.
+        """
+        connection.execute("SELECT 1 FROM businesses WHERE id = %s FOR UPDATE", (business_id,))
 
     @staticmethod
     def _look(connection: psycopg.Connection[Any], business_id: str, state: str) -> Look | None:
@@ -338,6 +352,7 @@ class LookService:
         """
         with self._database.connection() as connection:
             business = OwnerService._member_business(connection, account, slug)
+            self._lock(connection, business.id)
             if look.logo_id is not None:
                 owned = connection.execute(
                     "SELECT 1 FROM business_logos WHERE id = %s::uuid AND business_id = %s",
@@ -366,6 +381,7 @@ class LookService:
         """
         with self._database.connection() as connection:
             business = OwnerService._member_business(connection, account, slug)
+            self._lock(connection, business.id)
             draft = self._look(connection, business.id, "draft")
             if draft is None:
                 raise InvalidChangeError("Save a draft before publishing.")
@@ -393,6 +409,7 @@ class LookService:
         """
         with self._database.connection() as connection:
             business = OwnerService._member_business(connection, account, slug)
+            self._lock(connection, business.id)
             connection.execute("DELETE FROM booking_looks WHERE business_id = %s", (business.id,))
             self._prune_logos(connection, business.id)
             return self._state(connection, business.id)
@@ -424,6 +441,7 @@ class LookService:
             raise InvalidChangeError("The file is not the image type it claims to be.")
         with self._database.connection() as connection:
             business = OwnerService._member_business(connection, account, slug)
+            self._lock(connection, business.id)
             row: Any = connection.execute(
                 "INSERT INTO business_logos (business_id, content_type, data) VALUES (%s, %s, %s) RETURNING id::text",
                 (business.id, content_type, data),
