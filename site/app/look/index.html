@@ -27,6 +27,13 @@
       <p class="notice warn" id="app-msg" role="alert" hidden></p>
       <p class="notice" id="look-plan" hidden></p>
 
+      <div class="tabs look-tabs" role="tablist" aria-label="Booking page" id="look-tabs" hidden>
+        <button type="button" role="tab" id="tab-look" aria-controls="look-editor" aria-selected="true">Look</button>
+        <button type="button" role="tab" id="tab-button" aria-controls="look-button" aria-selected="false">
+          Button for your website
+        </button>
+      </div>
+
       <div class="look-layout" id="look-editor" hidden>
         <section class="panel look-controls" aria-label="Look">
           <h3>1 · Start from a theme</h3>
@@ -88,6 +95,74 @@
           <p class="small muted look-caption">
             Sample services and times. Customers keep seeing your published look until you press Publish.
           </p>
+        </section>
+      </div>
+
+      <div class="look-button" id="look-button" hidden>
+        <section class="panel" aria-labelledby="btn-h">
+          <h2 id="btn-h">Add a button to your website</h2>
+          <p class="small muted">
+            It's a normal link styled as a button. It opens your booking page in a new tab, so it works in any website
+            builder.
+          </p>
+          <p class="notice warn" id="btn-plan" hidden>
+            Your plan doesn't include a branded booking page, so this button uses the standard colours.
+            <a href="/app/plan/">Choose a plan to match your brand →</a>
+          </p>
+          <div class="look-colour">
+            <label for="btn-text">Button text</label>
+            <select id="btn-text"></select>
+          </div>
+          <div class="look-previews">
+            <div class="look-preview light">
+              <div id="pv-light"></div>
+              <span class="small">On a light website</span>
+            </div>
+            <div class="look-preview dark">
+              <div id="pv-dark"></div>
+              <span class="small">On a dark website</span>
+            </div>
+          </div>
+          <label class="small muted" for="btn-code">Code to paste</label>
+          <textarea class="look-code" id="btn-code" rows="6" readonly spellcheck="false"></textarea>
+          <div class="row look-code-actions">
+            <button type="button" class="btn small" id="btn-copy">Copy code</button>
+            <a class="btn ghost small" id="btn-mail" href="mailto:">Email to my web developer</a>
+          </div>
+          <p class="small muted" id="btn-msg" role="status"></p>
+          <p class="notice warn" id="btn-stale" hidden>
+            Copy it again. Your look or button text has changed since you last copied this code, so the button on your
+            website still has the old colours.
+          </p>
+          <p class="small muted">
+            The button takes its font from your website. Its colours and corners are copied from your published look at
+            the moment you copy.
+          </p>
+        </section>
+
+        <section class="panel" aria-labelledby="how-h">
+          <h2 id="how-h">How to add it</h2>
+          <details open>
+            <summary>WordPress</summary>
+            <p class="small muted">
+              Edit the page, add a <strong>Custom HTML</strong> block where you want the button, paste the code, then
+              update the page.
+            </p>
+          </details>
+          <details>
+            <summary>Other website builders</summary>
+            <p class="small muted">
+              Look for an <strong>HTML</strong>, <strong>code</strong> or <strong>embed</strong> block, paste the code
+              there and save. If yours only takes links, use the plain link under “Share your booking link” on the Today
+              screen.
+            </p>
+          </details>
+          <details>
+            <summary>Someone else looks after your website</summary>
+            <p class="small muted">
+              Use “Email to my web developer”. It opens your own email program with the code and the steps filled in.
+            </p>
+          </details>
         </section>
       </div>
     </main>

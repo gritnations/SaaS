@@ -1232,3 +1232,90 @@ body.app {
   margin: 10px 0 0;
   text-align: center;
 }
+
+/* Booking page: button for your website */
+
+.look-tabs {
+  align-self: flex-start;
+  width: fit-content;
+  margin-top: 16px;
+}
+
+.look-tabs[hidden],
+.look-button[hidden] {
+  display: none;
+}
+
+.look-button {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (min-width: 1000px) {
+  .look-button {
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.look-previews {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.look-preview {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 20px 12px;
+  border-radius: 10px;
+  text-align: center;
+}
+
+.look-preview.light {
+  background: #ffffff;
+  color: #555555;
+}
+
+.look-preview.dark {
+  background: #111111;
+  color: #aaaaaa;
+}
+
+.look-code {
+  display: block;
+  width: 100%;
+  margin: 6px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.look-code-actions {
+  margin-bottom: 8px;
+}
+
+.look-button details {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.look-button summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.look-button details p {
+  margin: 8px 0 0;
+}

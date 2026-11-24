@@ -4,6 +4,7 @@
 
 import { API_URL } from "./config.js";
 import { addDays, dateParts, el, fill, today } from "./gn.js";
+import { setUpButtonTab } from "./button-code.js";
 import { contrast, lookProperties } from "./look.js";
 import {
   CORNERS,
@@ -13,6 +14,7 @@ import {
   draftBody,
   editorState,
   fromServer,
+  liveLook,
   logoProblem,
   onAccent,
   readabilityProblems,
@@ -34,6 +36,7 @@ const state = {
   draft: null,
   published: null,
   working: { ...STANDARD },
+  tab: "look",
   device: "desktop",
   step: "pick",
   busy: false,
@@ -43,6 +46,7 @@ const state = {
   resetArmed: false,
 };
 
+let buttonTab = null;
 let previewHost = null;
 let previewContent = null;
 let appliedProperties = [];
@@ -374,6 +378,7 @@ function draw() {
   input("btn-reset").disabled = state.busy;
   input("btn-reset").textContent = state.resetArmed ? "Really reset?" : "Reset to standard";
   drawPreview();
+  if (buttonTab) buttonTab.draw({ look: liveLook(state), allowed: state.allowed });
 }
 
 /**
@@ -499,6 +504,18 @@ async function onLogo(file) {
   draw();
 }
 
+/**
+ * Show the Look tab or the Button tab. The address keeps "#button", so the Today screen can link straight to it.
+ * @param {"look"|"button"} name The tab.
+ */
+function showTab(name) {
+  state.tab = name;
+  input("look-editor").hidden = name !== "look";
+  input("look-button").hidden = name !== "button";
+  for (const tab of ["look", "button"]) input(`tab-${tab}`).setAttribute("aria-selected", String(tab === name));
+  history.replaceState(null, "", `${location.pathname}${location.search}${name === "button" ? "#button" : ""}`);
+}
+
 /** Build the controls that do not change: themes, fonts and corners, and wire every control up. */
 function build() {
   fill(
@@ -602,6 +619,8 @@ function build() {
   input("btn-publish").addEventListener("click", onPublish);
   input("btn-reset").addEventListener("click", onReset);
   input("link-live").href = bookingLink(state.slug);
+  buttonTab = setUpButtonTab(state.slug);
+  for (const tab of ["look", "button"]) input(`tab-${tab}`).addEventListener("click", () => showTab(tab));
 
   // The preview lives in a shadow tree so the owner screen's styles cannot reach it, and it uses the customer pages'
   // own stylesheet, so it cannot drift from the real page. It is for looking at, not for using.
@@ -629,7 +648,8 @@ async function start() {
   take(result.data);
   state.working = { ...(state.draft || state.published || STANDARD) };
   build();
-  input("look-editor").hidden = false;
+  input("look-tabs").hidden = false;
+  showTab(location.hash === "#button" ? "button" : "look");
   if (!state.allowed) {
     fill(
       input("look-plan"),
