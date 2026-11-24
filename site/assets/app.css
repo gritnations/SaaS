@@ -1180,6 +1180,18 @@ body.app {
   color: var(--amber);
 }
 
+/* "Choose a plan to publish" takes the place of Publish when branding is not included, so it looks like an offer. */
+.look-bar .btn.upgrade,
+.look-bar .btn.upgrade:hover {
+  background: var(--amber);
+  color: #111111;
+  box-shadow: none;
+}
+
+.look-bar .btn.upgrade:hover {
+  filter: brightness(1.08);
+}
+
 .look-views {
   display: flex;
   align-items: center;

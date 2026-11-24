@@ -39,6 +39,7 @@ const state = {
   busy: false,
   logoMessage: "",
   logoError: false,
+  logoBusy: false,
   resetArmed: false,
 };
 
@@ -368,7 +369,7 @@ function draw() {
   input("btn-save").disabled = state.busy || !s.canSave;
   const publish = input("btn-publish");
   publish.textContent = s.needsPlan ? "Choose a plan to publish" : "Publish";
-  publish.className = s.needsPlan ? "btn small" : "btn small";
+  publish.className = s.needsPlan ? "btn small upgrade" : "btn small";
   publish.disabled = s.needsPlan ? state.busy : state.busy || !s.canPublish;
   input("btn-reset").disabled = state.busy;
   input("btn-reset").textContent = state.resetArmed ? "Really reset?" : "Reset to standard";
