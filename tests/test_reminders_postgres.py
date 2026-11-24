@@ -6,10 +6,10 @@ so no email leaves the machine. A run claims due bookings across every business,
 test's bookings and at messages sent to this test's customers.
 
 What these tests establish: a due booking gets one reminder and only one; bookings that are too far off, booked
-late, cancelled, unpaid or already started get none; a moved booking is reminded for its new time; a failed send
-is retried up to the limit; a booking another run holds is skipped, not claimed twice; email that is not configured
-is recorded once and not retried; a real move records its time; and the run works with only the API role's
-privileges.
+late, cancelled, unpaid or already started get none; a moved booking is reminded for its new time; a failed send,
+or a message that cannot be built, is retried up to the limit; a booking another run holds is skipped, not claimed
+twice; email that is not configured is recorded once and not retried; a real move records its time; and the run
+works with only the API role's privileges.
 """
 
 import os
@@ -23,6 +23,7 @@ import pytest
 from test_app_api_role_postgres import LimitedDatabase
 from test_manage_postgres import URL_ENV, RecordingMailer, World, book, world  # noqa: F401
 
+from booking import notify
 from booking.notify import Notifier
 from booking.reminders import _CLAIM, BATCH_SIZE, MAX_ATTEMPTS, REMINDER_LEAD, ReminderService
 from postgres import Database, DatabaseSettings
@@ -356,3 +357,28 @@ def test_the_run_works_as_the_limited_role(shop: Shop) -> None:
         assert state(shop, sent)[1] == 1
     finally:
         limited.close()
+
+
+def test_a_refused_message_is_retried_and_sent_once_it_builds(shop: Shop, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A message that cannot be built from what is stored is a failure, retried, not given up on at once."""
+    booking = add(shop, 23 * HOUR)
+
+    def refuse(context: object) -> None:
+        """Stand in for a message that cannot be built.
+
+        Args:
+            context: Ignored.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError("refused")
+
+    monkeypatch.setattr(notify, "reminder_message", refuse)
+    first = shop.reminders.run()
+    assert first.failed >= 1 and first.dropped == 0
+    assert state(shop, booking) == (None, 1)
+    monkeypatch.undo()
+    shop.reminders.run()
+    assert len(reminded(shop)) == 1
+    assert logged(shop) == [("reminder", "customer", "failed"), ("reminder", "customer", "sent")]

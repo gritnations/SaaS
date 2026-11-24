@@ -600,9 +600,9 @@ class Notifier:
             booking_id: The booking.
 
         Returns:
-            ``sent``; ``skipped`` when email is not configured; ``failed`` when the booking could not be read or
-            the provider refused the email, so a later run may try again; or ``dropped`` when the booking is gone
-            or its message cannot be built, so trying again would not help.
+            ``sent``; ``skipped`` when email is not configured; ``failed`` when the booking could not be read, its
+            message could not be built from what is stored, or the provider refused the email, so a later run may
+            try again (the stored details may be corrected meanwhile); or ``dropped`` when the booking is gone.
         """
         try:
             loaded = self._context("confirmed", booking_id, None)
@@ -616,7 +616,8 @@ class Notifier:
             message = reminder_message(context)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("reminder message refused (%s)", type(exc).__name__)
-            return "dropped"
+            self._record(business_id, booking_id, "reminder", "customer", "failed", "", "message refused")
+            return "failed"
         if self._mailer is None:
             self._record(business_id, booking_id, "reminder", "customer", "skipped", "", "email not configured")
             return "skipped"

@@ -57,7 +57,7 @@ class RunResult(BaseModel):
         sent: Reminders the email provider accepted.
         skipped: Reminders recorded as skipped because email is not configured.
         failed: Reminders that failed and will be tried again, up to the attempt limit.
-        dropped: Bookings that could not be reminded and will not be tried again.
+        dropped: Bookings gone by the time of sending, which are not tried again.
     """
 
     model_config = ConfigDict(extra="forbid")

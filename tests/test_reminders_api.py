@@ -1,9 +1,9 @@
 """Tests for the reminder run route, with a fake reminder service and no database.
 
-What these tests establish: the route does not exist without ``REMINDERS_TOKEN``; it refuses a missing or wrong
-token; with the right token it runs the reminders and returns the counts; it answers 503 when the database is
-unavailable or absent; a short token stops the API from starting; and the reminder email itself carries no manage
-link and escapes what the customer typed.
+What these tests establish: the route answers 404 and runs nothing without ``REMINDERS_TOKEN``; it refuses a
+missing or wrong token; with the right token it runs the reminders and returns the counts; it answers 503 when the
+database is unavailable or absent; a short token stops the API from starting; and the reminder email itself carries
+no manage link and escapes what the customer typed.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -64,7 +64,7 @@ def client(reminders: FakeReminders | None, **overrides: str) -> TestClient:
     return TestClient(create_app(environ, api=create_api(environ, reminders=reminders)), raise_server_exceptions=False)
 
 
-def test_the_route_does_not_exist_without_a_token() -> None:
+def test_the_route_answers_404_without_a_token() -> None:
     """No ``REMINDERS_TOKEN``: 404, and nothing runs."""
     fake = FakeReminders()
     response = client(fake).post(PATH, headers={"Authorization": f"Bearer {TOKEN}"})

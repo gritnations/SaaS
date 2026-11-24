@@ -11,7 +11,8 @@ Routes:
     * ``/owner/...``: signed-in owner routes, defined in ``api.owner``.
     * ``/businesses/{business}/bookings/{reference}/...``: manage-link routes, defined in ``api.manage``.
     * ``POST /internal/reminders/run``: sends the reminder emails that are due. Called by a clock outside the
-      API with ``Authorization: Bearer <REMINDERS_TOKEN>``. It does not exist when that token is not set.
+      API with ``Authorization: Bearer <REMINDERS_TOKEN>``. It answers 404 and does nothing when that token is
+      not set. Like ``/metrics``, it is still listed in the development OpenAPI document.
 
 This module contains no SQL, no payment-provider implementation and no business logic. It delegates to
 ``postgres`` for the database, to ``payments`` for providers and to ``booking`` for bookings.
@@ -304,9 +305,9 @@ def create_api(
         ``app.state.database`` so that the root application can close it at shutdown.
 
     Raises:
-        ApiConfigError: If ``APP_ENV``, ``METRICS_TOKEN`` or ``REMINDERS_TOKEN`` is invalid, or ``BOOKING_PAGES_URL`` is set without
-            ``PUBLIC_SITE_URL``: payment notifications are recorded only when ``PUBLIC_SITE_URL`` is set, so
-            customers could otherwise pay for bookings that are never confirmed.
+        ApiConfigError: If ``APP_ENV``, ``METRICS_TOKEN`` or ``REMINDERS_TOKEN`` is invalid, or
+            ``BOOKING_PAGES_URL`` is set without ``PUBLIC_SITE_URL``: payment notifications are recorded only when
+            ``PUBLIC_SITE_URL`` is set, so customers could otherwise pay for bookings that are never confirmed.
         booking.notify.NotifyConfigError: If ``BOOKING_PAGES_URL`` is set and ``PUBLIC_SITE_URL`` is not an
             ``https://`` URL.
         api.auth.AuthConfigError: If ``SUPABASE_URL`` is set but invalid.
