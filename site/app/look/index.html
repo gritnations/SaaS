@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en-GB">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://*.gritnations.co.uk; connect-src https://*.supabase.co https://*.gritnations.co.uk; base-uri 'none'; form-action 'none'"
+    />
+    <title>Booking page</title>
+    <link rel="stylesheet" href="/assets/gn.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script type="module" src="/assets/booking-look.js"></script>
+  </head>
+  <body class="app">
+    <aside class="side" id="side" aria-label="Main menu"></aside>
+    <main class="main">
+      <header class="head">
+        <div>
+          <span class="muted small" id="head-sub">How customers see your page</span>
+          <h1 id="head-title">Booking page</h1>
+        </div>
+        <a class="btn ghost small" id="link-live" href="#" target="_blank" rel="noopener">View live page ↗</a>
+      </header>
+      <p class="notice warn" id="app-msg" role="alert" hidden></p>
+      <p class="notice" id="look-plan" hidden></p>
+
+      <div class="look-layout" id="look-editor" hidden>
+        <section class="panel look-controls" aria-label="Look">
+          <h3>1 · Start from a theme</h3>
+          <div class="look-themes" id="themes"></div>
+
+          <h3>2 · Logo</h3>
+          <div class="look-logo">
+            <div class="look-logo-thumb" id="logo-thumb"></div>
+            <div>
+              <label class="btn ghost small" for="logo-file">Upload image</label>
+              <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <button type="button" class="btn ghost small" id="logo-remove" hidden>Remove</button>
+              <p id="logo-hint" class="small muted" role="status"></p>
+            </div>
+          </div>
+
+          <h3>3 · Colours</h3>
+          <div class="look-colour">
+            <label for="c-accent">Buttons and highlights</label>
+            <span><input id="c-accent" type="color" /><code id="t-accent"></code></span>
+          </div>
+          <div class="look-colour">
+            <label for="c-background">Page background</label>
+            <span><input id="c-background" type="color" /><code id="t-background"></code></span>
+          </div>
+          <div class="look-colour">
+            <label for="c-text">Text</label>
+            <span><input id="c-text" type="color" /><code id="t-text"></code></span>
+          </div>
+          <p id="look-readable" class="look-readable ok" role="status"></p>
+
+          <h3>4 · Type and shape</h3>
+          <div class="look-colour">
+            <label for="look-font">Font</label>
+            <select id="look-font"></select>
+          </div>
+          <div class="look-colour">
+            <span id="corners-label">Corners</span>
+            <div class="tabs" role="tablist" aria-labelledby="corners-label" id="look-corners"></div>
+          </div>
+        </section>
+
+        <section class="panel" aria-label="Preview">
+          <div class="look-bar">
+            <span class="look-status" id="look-status" role="status"></span>
+            <button type="button" class="btn ghost small" id="btn-reset">Reset to standard</button>
+            <button type="button" class="btn ghost small" id="btn-save">Save draft</button>
+            <button type="button" class="btn small" id="btn-publish">Publish</button>
+          </div>
+          <p class="notice" id="look-msg" role="status" hidden></p>
+          <div class="look-views">
+            <span class="small muted">Preview</span>
+            <div class="tabs" role="tablist" aria-label="Screen size" id="look-device"></div>
+            <div class="tabs" role="tablist" aria-label="Page" id="look-step"></div>
+          </div>
+          <div class="look-canvas">
+            <div class="look-host" id="preview" aria-label="Preview of your booking page"></div>
+          </div>
+          <p class="small muted look-caption">
+            Sample services and times. Customers keep seeing your published look until you press Publish.
+          </p>
+        </section>
+      </div>
+    </main>
+    <nav class="bottom-nav" id="bottom" aria-label="Main menu"></nav>
+  </body>
+</html>

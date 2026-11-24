@@ -999,3 +999,224 @@ body.app {
 .plan-choice .btn {
   justify-self: start;
 }
+
+/* Booking page look editor */
+
+.look-layout {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.look-layout[hidden] {
+  display: none;
+}
+
+@media (min-width: 1000px) {
+  .look-layout {
+    grid-template-columns: 320px minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.look-controls h3 {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.look-controls h3:first-child {
+  margin-top: 0;
+}
+
+.look-themes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.look-theme {
+  padding: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: #ffffff;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.look-theme[aria-pressed="true"] {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px var(--amber);
+}
+
+.look-swatch {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 32px;
+  padding: 5px;
+  margin-bottom: 6px;
+  border-radius: 6px;
+}
+
+.look-swatch i {
+  display: block;
+  width: 22px;
+  height: 8px;
+  border-radius: 3px;
+}
+
+.look-swatch i + i {
+  width: 14px;
+}
+
+.look-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+}
+
+.look-logo-thumb {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 54px;
+  height: 54px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.look-logo-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.look-logo p {
+  margin: 6px 0 0;
+}
+
+.look-colour {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.look-colour > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.look-colour input[type="color"] {
+  width: 36px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.look-colour code {
+  width: 64px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.look-colour select {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  color: #ffffff;
+  font: inherit;
+  font-size: 14px;
+}
+
+.look-readable {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.look-readable.ok {
+  background: rgba(95, 179, 122, 0.14);
+  color: #9fe0b2;
+}
+
+.look-readable.bad {
+  background: rgba(214, 44, 45, 0.16);
+  color: #ffb4b4;
+}
+
+.look-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.look-status {
+  flex: 1 1 200px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.look-status.dirty {
+  color: var(--amber);
+}
+
+.look-views {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.look-canvas {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+/* The preview itself. It takes its colours from the look's custom properties, set on this element. */
+.look-host {
+  display: block;
+  width: 100%;
+  max-width: 860px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--page-bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  transition: max-width 0.25s;
+}
+
+.look-host.phone {
+  max-width: 380px;
+}
+
+.look-caption {
+  margin: 10px 0 0;
+  text-align: center;
+}

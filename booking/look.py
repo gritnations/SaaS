@@ -78,8 +78,12 @@ class Look(BaseModel):
     logo_id: LogoId | None = None
 
 
-DEFAULT_LOOK = Look(accent="#13355a", background="#ffffff", text="#1c2733", font="modern", corners="soft")
-"""The look customers see when a business has published none, or its plan does not include branding."""
+DEFAULT_LOOK = Look(accent="#d62c2d", background="#070f1a", text="#ffffff", font="modern", corners="soft")
+"""The look customers see when a business has published none, or its plan does not include branding.
+
+It is the customer pages' own colours (``--red``, ``--ink`` and ``--text`` in ``public/assets/gn.css``), so choosing
+the default look in the editor, or resetting to it, matches the page a business without a look already has.
+"""
 
 
 class LookState(BaseModel):

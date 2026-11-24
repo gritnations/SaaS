@@ -17,6 +17,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 | `app/hours/`    | Opening hours: weekly editor, and days off (a day or a run of days).       |
 | `app/settings/` | Business details, customer contact details and booking rules.             |
 | `app/payments/` | Stripe connection and how customers pay.                                  |
+| `app/look/`     | Booking page: theme, logo, colours, font and corners, live preview.       |
 | `app/plan/`     | Plan, upgrades, the subscription portal, and cancel with a refund.         |
 | `app/more/`     | Phone menu page: Opening hours, Payments, Your plan, Sign out.            |
 | `app/setup/`    | Creates the business after a new owner confirms their email.              |
@@ -26,7 +27,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 Upload the contents of `site/` (without this README) to the staging site's root, plus:
 
 ```text
-assets/gn.css, assets/gn.js, assets/fonts/   from public/assets/
+assets/gn.css, assets/gn.js, assets/look.js, assets/fonts/   from public/assets/
 assets/config.js                              made from site/assets/config.example.js with the real values
 ```
 
