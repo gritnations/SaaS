@@ -42,6 +42,8 @@ EXPECTED = {
     "payment_events": {"INSERT"},
     "time_off": {"SELECT", "INSERT", "DELETE"},
     "weekly_hours": {"SELECT", "INSERT", "DELETE"},
+    "booking_looks": {"SELECT", "INSERT", "UPDATE", "DELETE"},
+    "business_logos": {"SELECT", "INSERT", "DELETE"},
 }
 ALL_PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 

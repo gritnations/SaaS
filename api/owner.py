@@ -11,6 +11,7 @@ Routes:
     * ``GET`` and ``POST /owner/businesses/{business}/services``; ``PATCH .../services/{service}``.
     * ``GET`` and ``PUT /owner/businesses/{business}/hours``.
     * ``GET`` and ``PATCH /owner/businesses/{business}/settings``.
+    * ``/owner/businesses/{business}/look...``: the booking page look editor (``api.look``).
 
 Responses carry customer details, so the ingress boundary's ``Cache-Control: no-store`` applies.
 """
@@ -25,6 +26,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstra
 
 from api.auth import TokenError, TokenVerifier
 from api.booking import PHONE_PATTERN, Slug
+from api.look import LookBackend, add_owner_routes
 from booking.availability import session_label, time_to_minutes
 from booking.billing import BillingBackend
 from booking.owner import (
@@ -1017,6 +1019,7 @@ def build_router(
     backend: Callable[[], OwnerBackend | None],
     payments: Callable[[], PaymentsBackend | None] = lambda: None,
     billing: Callable[[], BillingBackend | None] = lambda: None,
+    looks: Callable[[], LookBackend | None] = lambda: None,
 ) -> APIRouter:
     """Build the owner routes.
 
@@ -1025,6 +1028,7 @@ def build_router(
         backend: Returns the owner service, or ``None`` when the database is not configured.
         payments: Returns the payment service, or ``None`` when online payments are not configured.
         billing: Returns the plan billing service, or ``None`` when paid plans cannot be billed.
+        looks: Returns the booking page look service, or ``None`` when the database is not configured.
 
     Returns:
         The router, to be included in the API.
@@ -1057,6 +1061,7 @@ def build_router(
             ) from None
 
     Account = Annotated[str, Depends(account)]
+    add_owner_routes(router, account, looks)
 
     def service() -> OwnerBackend:
         """Get the owner service, or answer 503 when there is none.

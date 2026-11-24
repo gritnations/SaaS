@@ -47,6 +47,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
+from api import look as look_routes
 from api import manage as manage_routes
 from api import owner as owner_routes
 from api.auth import TokenVerifier, verifier_from_environment
@@ -54,6 +55,7 @@ from api.booking import build_router
 from api.metrics import Metrics
 from booking.billing import BillingBackend, BillingService
 from booking.links import PAGES_URL_ENV, CustomerLinks
+from booking.look import LookService
 from booking.manage import ManageService
 from booking.notify import SITE_URL_ENV, Notifier, site_url_from_environment
 from booking.owner import OwnerService
@@ -281,6 +283,7 @@ def create_api(
     payments: PaymentsBackend | None = None,
     billing: BillingBackend | None = None,
     reminders: ReminderBackend | None = None,
+    looks: look_routes.LookBackend | None = None,
 ) -> FastAPI:
     """Build the API application.
 
@@ -299,6 +302,8 @@ def create_api(
             secret is also set; without it paid plans are not offered.
         reminders: The reminder service. ``None`` means build it on a real database. The route exists only
             when ``REMINDERS_TOKEN`` is set.
+        looks: The booking page look service. ``None`` means build it on a real database; without one the look
+            routes answer 503.
 
     Returns:
         The FastAPI application. The database boundary, or ``None``, is stored on
@@ -353,10 +358,15 @@ def create_api(
             manage = ManageService(probe, notifier=notifier, refunds=refunds)
         if reminders is None:
             reminders = ReminderService(probe, notifier)
+        if looks is None:
+            looks = LookService(probe)
     if verifier is None:
         verifier = verifier_from_environment(env)
     api.include_router(build_router(lambda: bookings))
-    api.include_router(owner_routes.build_router(lambda: verifier, lambda: owners, lambda: payments, lambda: billing))
+    api.include_router(
+        owner_routes.build_router(lambda: verifier, lambda: owners, lambda: payments, lambda: billing, lambda: looks)
+    )
+    api.include_router(look_routes.build_public_router(lambda: looks))
     api.include_router(manage_routes.build_router(lambda: manage))
 
     @api.middleware("http")
