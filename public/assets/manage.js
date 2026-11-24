@@ -2,6 +2,7 @@
 // The code stays in the address after "#", so it is never sent to a server in a URL. It goes in request bodies.
 
 import { addDays, api, contactBlock, dateParts, downloadCalendar, el, fill, money, showBusiness, today } from "./gn.js";
+import { applyLook } from "./look.js";
 
 const CHUNK_DAYS = 14;
 const flow = document.getElementById("flow");
@@ -413,22 +414,23 @@ async function start() {
     );
     return;
   }
-  const [view, services] = await Promise.all([
+  const [view, services, logo] = await Promise.all([
     api(`/businesses/${state.slug}/bookings/${state.reference}/manage`, {
       method: "POST",
       body: { token: state.token },
     }),
     api(`/businesses/${state.slug}/services`),
+    applyLook(state.slug),
   ]);
   if (services.ok) state.business = services.data.business;
   if (!view.ok) {
-    showBusiness(state.business ? state.business.name : "Booking", "Booking not found");
+    showBusiness(state.business ? state.business.name : "Booking", "Booking not found", logo);
     fill(flow, el("p", { class: "notice warn", role: "alert" }, failure(view, "")));
     fill(aside, state.business ? contactBlock(state.business) : null);
     return;
   }
   state.booking = view.data;
-  showBusiness(state.booking.business_name, `Your booking with ${state.booking.business_name}`);
+  showBusiness(state.booking.business_name, `Your booking with ${state.booking.business_name}`, logo);
   render();
 }
 

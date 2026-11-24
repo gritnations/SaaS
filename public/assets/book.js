@@ -1,6 +1,7 @@
 // The customer booking page: pick a service, a day and a time, give your details, book.
 
 import { addDays, api, contactBlock, dateParts, downloadCalendar, el, fill, money, showBusiness, today } from "./gn.js";
+import { applyLook } from "./look.js";
 
 const CHUNK_DAYS = 14;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -650,7 +651,7 @@ async function start() {
     );
     return;
   }
-  const answer = await api(`/businesses/${state.slug}/services`);
+  const [answer, logo] = await Promise.all([api(`/businesses/${state.slug}/services`), applyLook(state.slug)]);
   if (answer.status === 404) {
     showBusiness("Booking", "Booking page not found");
     fill(
@@ -678,7 +679,7 @@ async function start() {
   state.business = answer.data.business;
   state.services = answer.data.services;
   state.pay = payOptions().includes("online") ? "online" : "venue";
-  showBusiness(state.business.name, `Book with ${state.business.name}`);
+  showBusiness(state.business.name, `Book with ${state.business.name}`, logo);
   document.getElementById("business-sub").textContent = "Book online";
   render();
   if (state.services.length === 1 && !state.returned) chooseService(state.services[0]);
