@@ -3,7 +3,9 @@
 // What these tests establish: every starting theme can be published; the standard look is the customer pages' own
 // colours; the readability rules and the button text colour match the server's; the editor reports a look as
 // published, saved as a draft or unsaved, and allows saving and publishing accordingly; a draft is sent with exactly
-// the fields the API accepts; and a logo file is checked before it is sent.
+// the fields the API accepts; a logo file is checked before it is sent; and the website button's code is built only
+// from fixed texts and checked colours, escaped, in the colours of the look customers see, with a way to tell when
+// a copy of it has gone out of date.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,18 +14,26 @@ import { test } from "node:test";
 
 import { contrast } from "../public/assets/look.js";
 import {
+  BUTTON_TEXTS,
   CORNERS,
   FONTS,
   LOGO_MAX_BYTES,
   STANDARD,
   THEMES,
+  buttonSnippet,
+  buttonStyle,
+  copiedCodeIsStale,
+  developerEmail,
   draftBody,
   editorState,
+  escapeHtml,
   fromServer,
+  liveLook,
   logoProblem,
   onAccent,
   readabilityProblems,
   sameLook,
+  snippetFingerprint,
 } from "../site/assets/look-model.js";
 
 const MIDNIGHT = THEMES.find((t) => t.id === "midnight");
@@ -132,4 +142,111 @@ test("a logo file is checked before it is sent", () => {
   assert.match(logoProblem({ type: "image/gif", size: 1000 }), /isn't allowed/);
   assert.match(logoProblem({ type: "image/png", size: 0 }), /empty/);
   assert.match(logoProblem({ type: "image/png", size: LOGO_MAX_BYTES + 1 }), /The limit is 60 KB/);
+});
+
+const HREF = "https://book.example.com/book/example-barbershop";
+const snippetFor = (look, text = "Book now", href = HREF) => buttonSnippet({ href, text, look, contrast });
+
+test("the button code is a plain link in the look's colours, with no script or frame", () => {
+  const standard = snippetFor(STANDARD);
+  assert.match(standard, /^<a href="https:\/\/book\.example\.com\/book\/example-barbershop"/);
+  assert.match(standard, /target="_blank" rel="noopener"/);
+  assert.match(standard, /border-radius:10px;background:#d62c2d;color:#ffffff;/);
+  assert.ok(standard.endsWith(">\n  Book now\n</a>"));
+  const midnight = snippetFor(MIDNIGHT, "Book online");
+  assert.match(midnight, /background:#e0aa55;color:#111111;/);
+  assert.doesNotMatch(standard + midnight, /<script|<iframe|<style|onclick|javascript:/i);
+  assert.equal(buttonStyle({ ...MIDNIGHT, corners: "round" }, contrast).borderRadius, "24px");
+  assert.equal(buttonStyle({ ...MIDNIGHT, corners: "sharp" }, contrast).borderRadius, "2px");
+});
+
+test("every theme and every text makes a code that fits in a mailto link", () => {
+  for (const theme of THEMES) {
+    for (const text of BUTTON_TEXTS) {
+      const snippet = snippetFor(theme, text);
+      assert.ok(snippet.includes(escapeHtml(text)), `${theme.name} / ${text}`);
+      assert.ok(developerEmail(snippet).length < 2000, `${theme.name} / ${text}`);
+    }
+  }
+});
+
+test("only the fixed button texts and checked colours are accepted", () => {
+  for (const text of ["<script>alert(1)</script>", "Book now!", "", "book now", 'Book now" onclick="x', null]) {
+    assert.throws(() => snippetFor(STANDARD, text), /not one of the choices/, String(text));
+  }
+  assert.throws(() => buttonSnippet({ href: HREF, look: STANDARD, contrast }), /not one of the choices/);
+  for (const accent of ["red", "#D62C2D", "#d62c2d;}body{display:none", "url(x)", "#fff"]) {
+    assert.throws(() => snippetFor({ ...STANDARD, accent }), /cannot be used/, accent);
+  }
+  for (const corners of ["pill", "constructor", "__proto__"]) {
+    assert.throws(() => snippetFor({ ...STANDARD, corners }), /cannot be used/, corners);
+  }
+});
+
+test("only an absolute http or https address is accepted, so no script address can reach the code", () => {
+  for (const href of [
+    "javascript:alert(1)",
+    "JaVaScRiPt:alert(1)",
+    " javascript:alert(1)",
+    "\u0009javascript:alert(1)",
+    "\njavascript:alert(1)",
+    "data:text/html,<b>x</b>",
+    "vbscript:x",
+    "//evil.example/book/x",
+    "/book/x",
+    "book.example.com/book/x",
+    "https://",
+    "https://book.example.com/a b",
+    "",
+    null,
+    42,
+    ["https://book.example.com/book/x"],
+    { toString: () => "https://book.example.com/book/x" },
+  ]) {
+    assert.throws(() => snippetFor(STANDARD, "Book now", href), /not a web address/, String(href));
+  }
+  assert.throws(() => buttonSnippet({ text: "Book now", look: STANDARD, contrast }), /not a web address/);
+  for (const href of [
+    "https://book.example.com/book/x",
+    "http://localhost:8000/book/x",
+    "HTTPS://BOOK.EXAMPLE.COM/book/x",
+  ]) {
+    assert.ok(snippetFor(STANDARD, "Book now", href).startsWith(`<a href="${href}"`), href);
+  }
+});
+
+test("the address is escaped, so it cannot break out of its attribute", () => {
+  const snippet = snippetFor(STANDARD, "Book now", 'https://book.example.com/book/x?a=1&b="2"><script>');
+  assert.ok(snippet.includes('href="https://book.example.com/book/x?a=1&amp;b=&quot;2&quot;&gt;&lt;script&gt;"'));
+  assert.doesNotMatch(snippet, /<script/);
+  assert.equal(escapeHtml(`<>&"'`), "&lt;&gt;&amp;&quot;&#39;");
+});
+
+test("the button uses the look customers see: the published look while branding is included", () => {
+  assert.deepEqual(liveLook({ allowed: true, published: MIDNIGHT }), MIDNIGHT);
+  assert.deepEqual(liveLook({ allowed: true, published: null }), { ...STANDARD });
+  assert.deepEqual(liveLook({ allowed: false, published: MIDNIGHT }), { ...STANDARD });
+});
+
+test("a copied code is out of date only after the code changes", () => {
+  const first = snippetFingerprint(snippetFor(STANDARD));
+  assert.match(first, /^[0-9a-f]{8}$/);
+  assert.equal(first, snippetFingerprint(snippetFor(STANDARD)));
+  assert.notEqual(first, snippetFingerprint(snippetFor(MIDNIGHT)));
+  assert.notEqual(first, snippetFingerprint(snippetFor(STANDARD, "Book online")));
+  assert.notEqual(first, snippetFingerprint(snippetFor(STANDARD, "Book now", `${HREF}-2`)));
+  assert.equal(copiedCodeIsStale(null, first), false);
+  assert.equal(copiedCodeIsStale("", first), false);
+  assert.equal(copiedCodeIsStale(first, first), false);
+  assert.equal(copiedCodeIsStale(first, snippetFingerprint(snippetFor(MIDNIGHT))), true);
+});
+
+test("the email to a web developer carries the code and the steps, and nothing is sent by us", () => {
+  const snippet = snippetFor(MIDNIGHT);
+  const link = developerEmail(snippet);
+  assert.match(link, /^mailto:\?subject=/);
+  const body = decodeURIComponent(link.split("&body=")[1]);
+  assert.ok(body.includes(snippet));
+  assert.match(body, /Paste it into the page's HTML/);
+  assert.match(decodeURIComponent(link.split("?subject=")[1].split("&")[0]), /booking button/);
 });

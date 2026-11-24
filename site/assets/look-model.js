@@ -186,3 +186,108 @@ export function logoProblem(file) {
   }
   return "";
 }
+
+/** The button texts an owner can choose from. Fixed, so nothing an owner types can reach their own website. */
+export const BUTTON_TEXTS = ["Book now", "Book an appointment", "Book online", "Reserve your slot"];
+
+/** Button corner radius for each corner style: the same shapes as the customer pages' buttons. */
+const BUTTON_RADIUS = { sharp: "2px", soft: "10px", round: "24px" };
+
+/**
+ * Escape text for use in HTML, in text or in a double-quoted attribute.
+ * @param {string} value The text.
+ * @returns {string} The escaped text.
+ */
+export function escapeHtml(value) {
+  return String(value).replace(
+    /[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+  );
+}
+
+/**
+ * The look the customers' booking page has now: the published look while the plan includes branding, otherwise the
+ * standard look.
+ * @param {{allowed: boolean, published: object|null}} state Whether branding is included, and the published look.
+ * @returns {object} The look.
+ */
+export function liveLook({ allowed, published }) {
+  return allowed && published ? published : { ...STANDARD };
+}
+
+/**
+ * The button's colours and corners for a look: its accent as the background, with white or near-black text.
+ * @param {{accent: string, corners: string}} look The look.
+ * @param {(a: string, b: string) => number} contrast The WCAG contrast ratio of two colours.
+ * @returns {{background: string, color: string, borderRadius: string}} The three styles.
+ * @throws {Error} If the look is not one the server could have stored.
+ */
+export function buttonStyle(look, contrast) {
+  if (!/^#[0-9a-f]{6}$/.test(look.accent) || !Object.hasOwn(BUTTON_RADIUS, look.corners)) {
+    throw new Error("That look cannot be used for a button.");
+  }
+  return { background: look.accent, color: onAccent(look.accent, contrast), borderRadius: BUTTON_RADIUS[look.corners] };
+}
+
+/**
+ * The code an owner pastes into their website: a plain link, styled as a button, that opens the booking page in a
+ * new tab. No script and no frame, so it works in any website builder. The font is the website's own.
+ * @param {{href: string, text: string, look: object, contrast: (a: string, b: string) => number}} parts The booking
+ *   page address, one of the fixed button texts, the look, and the contrast function.
+ * @returns {string} The HTML.
+ * @throws {Error} If the text is not one of the fixed texts, the address is not an absolute http or https address
+ *   (so a `javascript:` or `data:` address can never reach the code), or the look cannot be used.
+ */
+export function buttonSnippet({ href, text, look, contrast }) {
+  if (!BUTTON_TEXTS.includes(text)) throw new Error("That button text is not one of the choices.");
+  if (typeof href !== "string" || !/^https?:\/\/\S+$/i.test(href)) {
+    throw new Error("That booking page address is not a web address.");
+  }
+  const { background, color, borderRadius } = buttonStyle(look, contrast);
+  const style = `display:inline-block;padding:12px 22px;border-radius:${borderRadius};background:${background};color:${color};text-decoration:none;font-weight:600`;
+  return `<a href="${escapeHtml(href)}"\n   target="_blank" rel="noopener"\n   style="${style}">\n  ${escapeHtml(text)}\n</a>`;
+}
+
+/**
+ * A short fingerprint of the code, to tell later whether it has changed since it was copied. Not a security
+ * measure: it only compares two strings.
+ * @param {string} snippet The code.
+ * @returns {string} Eight hexadecimal characters.
+ */
+export function snippetFingerprint(snippet) {
+  let hash = 5381;
+  for (let i = 0; i < snippet.length; i += 1) hash = (Math.imul(hash, 33) ^ snippet.charCodeAt(i)) >>> 0;
+  return hash.toString(16).padStart(8, "0");
+}
+
+/**
+ * Whether the code the owner last copied is out of date: they copied one, and the current code is different.
+ * @param {string|null} copied The fingerprint saved when they last copied, or null if they never did.
+ * @param {string} current The fingerprint of the current code.
+ * @returns {boolean} True when the button on their website no longer matches.
+ */
+export function copiedCodeIsStale(copied, current) {
+  return Boolean(copied) && copied !== current;
+}
+
+/**
+ * An email, for the owner to send to whoever looks after their website, as a mailto link. It opens the owner's own
+ * mail program with the message filled in; nothing is sent from our system.
+ * @param {string} snippet The code to paste.
+ * @returns {string} The mailto address.
+ */
+export function developerEmail(snippet) {
+  const subject = "Please add a booking button to our website";
+  const body = [
+    "Hi,",
+    "",
+    "Please add this booking button to our website, where customers should click to book. Paste it into the page's HTML where the button should appear:",
+    "",
+    snippet,
+    "",
+    "It opens our booking page in a new tab. Nothing else is needed.",
+    "",
+    "Thanks",
+  ].join("\r\n");
+  return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
