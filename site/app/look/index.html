@@ -113,6 +113,16 @@
             <label for="btn-text">Button text</label>
             <select id="btn-text"></select>
           </div>
+          <div class="look-text-row" id="btn-custom-row" hidden>
+            <label class="field" for="btn-custom">
+              Your button text
+              <input id="btn-custom" type="text" autocomplete="off" aria-describedby="btn-text-note" />
+            </label>
+            <p class="small" id="btn-text-note" role="status">
+              <span class="muted" id="btn-count"></span>
+              <span class="muted" id="btn-text-error"></span>
+            </p>
+          </div>
           <div class="look-previews">
             <div class="look-preview light">
               <div id="pv-light"></div>

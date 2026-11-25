@@ -1304,6 +1304,35 @@ body.app {
   margin-bottom: 8px;
 }
 
+.look-text-row {
+  margin: 4px 0 12px;
+}
+
+.look-text-row .field {
+  margin-bottom: 4px;
+}
+
+.look-text-row p {
+  margin: 0;
+}
+
+.look-text-row p span + span::before {
+  content: " · ";
+}
+
+.look-text-row p span:empty {
+  display: none;
+}
+
+.look-text-row p span:empty + span::before {
+  content: "";
+}
+
+.look-code-actions a[aria-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .look-button details {
   margin-top: 8px;
   padding: 8px 12px;
