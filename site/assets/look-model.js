@@ -188,8 +188,51 @@ export function logoProblem(file) {
   return "";
 }
 
-/** The button texts an owner can choose from. Fixed, so nothing an owner types can reach their own website. */
+/** The button texts we suggest. An owner can also type their own. */
 export const BUTTON_TEXTS = ["Book now", "Book an appointment", "Book online", "Reserve your slot"];
+
+/** The most characters (not bytes) a button text may have. */
+export const BUTTON_TEXT_MAX = 40;
+
+/** Characters a button text may not contain: control characters, line and paragraph separators, and the bidi overrides
+ * and isolates that can make text display in a different order from the order it is written. */
+// eslint-disable-next-line no-control-regex -- refusing control characters is the point of this pattern
+const FORBIDDEN_IN_TEXT = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
+/**
+ * Tidy a button text the way the code will carry it: no spaces at either end, and each run of spaces made one.
+ * @param {string} text The text as typed.
+ * @returns {string} The tidied text, or "" if it was not a string.
+ */
+export function normaliseButtonText(text) {
+  return typeof text === "string" ? text.trim().replace(/ {2,}/g, " ") : "";
+}
+
+/**
+ * Say what is wrong with a button text. Any language is fine, and so is any punctuation: the text is escaped when the
+ * code is built, so it cannot break out of the link.
+ * @param {unknown} text The text as typed.
+ * @returns {string} What is wrong, in plain words, or "" when the text can be used.
+ */
+export function buttonTextProblem(text) {
+  if (typeof text !== "string") return "Type the words for your button.";
+  const tidy = normaliseButtonText(text);
+  if (!tidy) return "Type the words for your button.";
+  if (FORBIDDEN_IN_TEXT.test(tidy)) return "That text has a line break or a character we can't use on a button.";
+  const length = [...tidy].length;
+  if (length > BUTTON_TEXT_MAX) return `Use at most ${BUTTON_TEXT_MAX} characters. This is ${length}.`;
+  return "";
+}
+
+/**
+ * Read a saved button text back. It was typed by the owner in this browser, so it is checked again before use.
+ * @param {string|null|undefined} saved What was saved, or nothing.
+ * @returns {string|null} The text to use, or null when there is nothing usable.
+ */
+export function readSavedButtonText(saved) {
+  if (typeof saved !== "string" || buttonTextProblem(saved)) return null;
+  return normaliseButtonText(saved);
+}
 
 /** Button corner radius for each corner style: the same shapes as the customer pages' buttons. */
 const BUTTON_RADIUS = { sharp: "2px", soft: "10px", round: "24px" };
@@ -234,19 +277,20 @@ export function buttonStyle(look, contrast) {
  * The code an owner pastes into their website: a plain link, styled as a button, that opens the booking page in a
  * new tab. No script and no frame, so it works in any website builder. The font is the website's own.
  * @param {{href: string, text: string, look: object, contrast: (a: string, b: string) => number}} parts The booking
- *   page address, one of the fixed button texts, the look, and the contrast function.
- * @returns {string} The HTML.
- * @throws {Error} If the text is not one of the fixed texts, the address is not an absolute http or https address
- *   (so a `javascript:` or `data:` address can never reach the code), or the look cannot be used.
+ *   page address, the button text (one of the suggestions or the owner's own), the look, and the contrast function.
+ * @returns {string} The HTML. The text is tidied and escaped.
+ * @throws {Error} If the text cannot be used (see {@link buttonTextProblem}), the address is not an absolute http or
+ *   https address (so a `javascript:` or `data:` address can never reach the code), or the look cannot be used.
  */
 export function buttonSnippet({ href, text, look, contrast }) {
-  if (!BUTTON_TEXTS.includes(text)) throw new Error("That button text is not one of the choices.");
+  if (buttonTextProblem(text)) throw new Error("That button text cannot be used.");
+  const label = normaliseButtonText(text);
   if (typeof href !== "string" || !/^https?:\/\/\S+$/i.test(href)) {
     throw new Error("That booking page address is not a web address.");
   }
   const { background, color, borderRadius } = buttonStyle(look, contrast);
   const style = `display:inline-block;padding:12px 22px;border-radius:${borderRadius};background:${background};color:${color};text-decoration:none;font-weight:600`;
-  return `<a href="${escapeHtml(href)}"\n   target="_blank" rel="noopener"\n   style="${style}">\n  ${escapeHtml(text)}\n</a>`;
+  return `<a href="${escapeHtml(href)}"\n   target="_blank" rel="noopener"\n   style="${style}">\n  ${escapeHtml(label)}\n</a>`;
 }
 
 /**

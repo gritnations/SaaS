@@ -15,6 +15,7 @@ import { test } from "node:test";
 import { contrast } from "../public/assets/look.js";
 import {
   BUTTON_TEXTS,
+  BUTTON_TEXT_MAX,
   CORNERS,
   FONTS,
   LOGO_MAX_BYTES,
@@ -22,6 +23,7 @@ import {
   THEMES,
   buttonSnippet,
   buttonStyle,
+  buttonTextProblem,
   copiedCodeIsStale,
   developerEmail,
   draftBody,
@@ -30,7 +32,9 @@ import {
   fromServer,
   liveLook,
   logoProblem,
+  normaliseButtonText,
   onAccent,
+  readSavedButtonText,
   readabilityProblems,
   sameLook,
   snippetFingerprint,
@@ -173,11 +177,82 @@ test("every theme and every text makes a code that fits in a mailto link", () =>
   }
 });
 
-test("only the fixed button texts and checked colours are accepted", () => {
-  for (const text of ["<script>alert(1)</script>", "Book now!", "", "book now", 'Book now" onclick="x', null]) {
-    assert.throws(() => snippetFor(STANDARD, text), /not one of the choices/, String(text));
+test("an owner's own button text is accepted in any language, tidied, and escaped", () => {
+  for (const text of [
+    "Get my free quote",
+    "Book now!",
+    "احجز الآن",
+    "Réservez ici ✂️",
+    "Book & save",
+    "A".repeat(40),
+  ]) {
+    assert.equal(buttonTextProblem(text), "", text);
+    assert.ok(snippetFor(STANDARD, text).endsWith(`>\n  ${escapeHtml(text)}\n</a>`), text);
   }
-  assert.throws(() => buttonSnippet({ href: HREF, look: STANDARD, contrast }), /not one of the choices/);
+  assert.ok(snippetFor(STANDARD, "   Book    now  ").endsWith(">\n  Book now\n</a>"));
+  assert.equal(normaliseButtonText("  a   b  "), "a b");
+  assert.equal(normaliseButtonText(null), "");
+  // HTML in the text is shown as text on the website, never run: it is escaped, not removed.
+  const sneaky = snippetFor(STANDARD, '<script>alert(1)</script> & "x"');
+  assert.doesNotMatch(sneaky, /<script/);
+  assert.ok(sneaky.includes("&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;x&quot;"));
+  // A quote in the text cannot close the style attribute or the tag around it.
+  const quoted = snippetFor(STANDARD, 'x" onclick="y');
+  assert.ok(quoted.includes("x&quot; onclick=&quot;y"));
+  assert.doesNotMatch(quoted, /\sonclick="/);
+});
+
+test("a button text that is empty, too long or has forbidden characters is refused with a plain reason", () => {
+  assert.equal(BUTTON_TEXT_MAX, 40);
+  const tooLong = "A".repeat(41);
+  assert.match(buttonTextProblem(tooLong), /at most 40 characters. This is 41/);
+  assert.equal(buttonTextProblem("A".repeat(40)), "");
+  // Characters are counted as people see them: 40 emoji fit even though each is two units of text.
+  assert.equal(buttonTextProblem("😀".repeat(40)), "");
+  assert.match(buttonTextProblem("😀".repeat(41)), /at most 40/);
+  for (const text of ["", "   ", null, undefined, 42, ["Book now"], { toString: () => "Book now" }]) {
+    assert.match(buttonTextProblem(text), /Type the words/, String(text));
+  }
+  for (const text of [
+    "Book\nnow",
+    "Book\tnow",
+    "Book\u0000now",
+    "Book\u007fnow",
+    "Book\u2028now",
+    "Book\u202enow",
+    "Book\u2066now",
+  ]) {
+    assert.match(buttonTextProblem(text), /line break or a character we can't use/, JSON.stringify(text));
+  }
+  for (const text of [tooLong, "", "Book\nnow", null, 42]) {
+    assert.throws(() => snippetFor(STANDARD, text), /button text cannot be used/, String(text));
+  }
+  assert.throws(() => buttonSnippet({ href: HREF, look: STANDARD, contrast }), /button text cannot be used/);
+});
+
+test("the worst-case button text still gives an email link that is short enough to open", () => {
+  for (const text of [
+    "&".repeat(40),
+    "<".repeat(40),
+    "احجز".repeat(10),
+    "😀".repeat(40),
+    '"'.repeat(40),
+    "ß".repeat(40),
+  ]) {
+    const length = developerEmail(snippetFor(STANDARD, text)).length;
+    assert.ok(length < 2000, `${text.slice(0, 6)}… gives ${length} characters`);
+  }
+});
+
+test("a saved button text is checked again before it is used", () => {
+  assert.equal(readSavedButtonText("Get my free quote"), "Get my free quote");
+  assert.equal(readSavedButtonText("  Book   now "), "Book now");
+  for (const saved of [null, undefined, "", "   ", "A".repeat(41), "Book\nnow", 42, ["x"]]) {
+    assert.equal(readSavedButtonText(saved), null, String(saved));
+  }
+});
+
+test("only checked colours and corner styles are accepted", () => {
   for (const accent of ["red", "#D62C2D", "#d62c2d;}body{display:none", "url(x)", "#fff"]) {
     assert.throws(() => snippetFor({ ...STANDARD, accent }), /cannot be used/, accent);
   }
