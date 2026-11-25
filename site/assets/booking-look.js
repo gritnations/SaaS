@@ -9,6 +9,7 @@ import { contrast, lookProperties } from "./look.js";
 import {
   CORNERS,
   FONTS,
+  LOGO_MAX_BYTES,
   STANDARD,
   THEMES,
   draftBody,
@@ -342,7 +343,9 @@ function draw() {
   input("logo-remove").hidden = !look.logo_id;
   input("logo-file").disabled = state.logoBusy;
   const hint = input("logo-hint");
-  hint.textContent = state.logoMessage || "PNG, JPEG or WebP, up to 60 KB. Without a logo your business name is shown.";
+  hint.textContent =
+    state.logoMessage ||
+    `PNG, JPEG or WebP, up to ${LOGO_MAX_BYTES / 1024} KB. Without a logo your business name is shown.`;
   hint.className = state.logoError ? "small error" : "small muted";
 
   const problems = readabilityProblems(look, contrast);
@@ -498,7 +501,7 @@ async function onLogo(file) {
     state.logoError = true;
     state.logoMessage =
       result.status === 413
-        ? "That image is too large. The limit is 60 KB."
+        ? `That image is too large. The limit is ${LOGO_MAX_BYTES / 1024} KB.`
         : reason(result, "The logo couldn't be uploaded. Check your connection and try again.");
   }
   draw();

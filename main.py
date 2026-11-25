@@ -21,6 +21,7 @@ Run it with ``uvicorn main:app --no-server-header``.
 
 import logging
 import os
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 
@@ -38,7 +39,15 @@ ALLOWED_HOSTS_ENV = "ALLOWED_HOSTS"
 CORS_ORIGINS_ENV = "CORS_ALLOWED_ORIGINS"
 DEFAULT_ALLOWED_HOSTS = ("localhost", "127.0.0.1")
 MAX_BODY_BYTES = 65_536
-"""The largest request body accepted, in bytes."""
+"""The largest request body accepted, in bytes. Every route has this limit except :data:`LOGO_UPLOAD_PATH`."""
+
+LOGO_UPLOAD_PATH = re.compile(r"/owner/businesses/[a-z0-9-]+/look/logo")
+"""The one route that takes a larger body: an owner uploading a logo. It matches the whole path, so a trailing slash
+or any other route keeps the global limit."""
+
+LOGO_UPLOAD_MAX_BODY_BYTES = 131_072
+"""The largest body accepted on :data:`LOGO_UPLOAD_PATH`, in bytes. The logo limit is 100 KB; the extra room lets the
+service refuse a slightly larger image with a clear message. A test keeps it above the logo limit."""
 
 BODY_METHODS = frozenset({"POST", "PUT", "PATCH"})
 SECURITY_HEADERS = {
@@ -97,11 +106,25 @@ async def on_unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     return error_response(500, "Internal server error.")
 
 
+def body_limit(request: Request) -> int:
+    """Give the largest body the request may declare.
+
+    Args:
+        request: The incoming request.
+
+    Returns:
+        :data:`LOGO_UPLOAD_MAX_BODY_BYTES` for a POST to :data:`LOGO_UPLOAD_PATH`, otherwise :data:`MAX_BODY_BYTES`.
+    """
+    if request.method == "POST" and LOGO_UPLOAD_PATH.fullmatch(request.url.path):
+        return LOGO_UPLOAD_MAX_BODY_BYTES
+    return MAX_BODY_BYTES
+
+
 async def ingress_guard(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Apply the global request limits, controlled error handling and security headers.
 
     POST, PUT and PATCH requests without ``Content-Length`` receive 411. On any method, a
-    non-digit length receives 400 and a declared length above :data:`MAX_BODY_BYTES` receives 413.
+    non-digit length receives 400 and a declared length above :func:`body_limit` receives 413.
     Only the declared length is checked; the body is not measured. Exceptions from ``call_next``
     become a generic 500. Errors raised inside the API are handled by :func:`on_unhandled_error`.
 
@@ -117,7 +140,7 @@ async def ingress_guard(request: Request, call_next: Callable[[Request], Awaitab
         response: Response = error_response(411, "A Content-Length header is required.")
     elif length is not None and not (length.isascii() and length.isdigit()):
         response = error_response(400, "Invalid Content-Length.")
-    elif length is not None and int(length) > MAX_BODY_BYTES:
+    elif length is not None and int(length) > body_limit(request):
         response = error_response(413, "Request body is too large.")
     else:
         try:

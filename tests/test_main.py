@@ -7,7 +7,9 @@ from fastapi.testclient import TestClient
 from helpers import ORIGIN, FakeDatabase, build_client
 
 import main
-from main import MAX_BODY_BYTES, SECURITY_HEADERS, IngressConfigError, create_app
+from main import LOGO_UPLOAD_MAX_BODY_BYTES, MAX_BODY_BYTES, SECURITY_HEADERS, IngressConfigError, create_app
+
+LOGO_ROUTE = "/owner/businesses/example/look/logo"
 
 
 def test_the_module_imports_and_serves_with_no_configuration() -> None:
@@ -82,6 +84,38 @@ def test_unsafe_ingress_configuration_stops_the_application(environ: dict[str, s
 def test_an_oversized_body_is_refused() -> None:
     """A body over the limit is refused with 413 before the API sees it."""
     response = build_client().post("/payments/stub/webhook", content=b"x" * (MAX_BODY_BYTES + 1))
+    assert response.status_code == 413
+
+
+def test_the_logo_upload_route_takes_a_larger_body_than_any_other_route() -> None:
+    """A logo upload may declare up to its own limit. One byte more is refused with 413 before the API sees it.
+
+    The first two requests are not signed in, so they reach the API and are refused there for that reason. What
+    matters is that the ingress guard does not answer 413.
+    """
+    client = build_client()
+    assert client.post(LOGO_ROUTE, content=bytes(MAX_BODY_BYTES + 1)).status_code != 413
+    assert client.post(LOGO_ROUTE, content=bytes(LOGO_UPLOAD_MAX_BODY_BYTES)).status_code != 413
+    assert client.post(LOGO_ROUTE, content=bytes(LOGO_UPLOAD_MAX_BODY_BYTES + 1)).status_code == 413
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", LOGO_ROUTE + "/"),
+        ("POST", LOGO_ROUTE + "/extra"),
+        ("PUT", LOGO_ROUTE),
+        ("PATCH", LOGO_ROUTE),
+        ("POST", "/owner/businesses/EXAMPLE/look/logo"),
+        ("POST", "/owner/businesses/example/look/publish"),
+        ("PUT", "/owner/businesses/example/look/draft"),
+        ("POST", "/businesses/example/look/logo"),
+        ("POST", "/payments/stub/webhook"),
+    ],
+)
+def test_every_other_route_keeps_the_global_body_limit(method: str, path: str) -> None:
+    """Only a POST to exactly the logo upload route gets the larger limit. Anything else over 64 KB is refused."""
+    response = build_client().request(method, path, content=bytes(MAX_BODY_BYTES + 1))
     assert response.status_code == 413
 
 

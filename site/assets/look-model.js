@@ -5,8 +5,9 @@
 /** Image types the server accepts for a logo. */
 export const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
-/** The largest logo, in bytes. The API refuses any request body over 64 KB, so the limit is 60 KB. */
-export const LOGO_MAX_BYTES = 61440;
+/** The largest logo, in bytes (100 KB). The API takes a body this large on the logo upload route only; every other
+ * route refuses more than 64 KB. The database checks the same number. */
+export const LOGO_MAX_BYTES = 102400;
 
 /** Font choices: the value the server stores and what the owner reads. */
 export const FONTS = [

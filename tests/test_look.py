@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from booking.look import (
     DEFAULT_LOOK,
+    LOGO_MAX_BYTES,
     Look,
     branding_allowed,
     contrast,
@@ -23,6 +24,7 @@ from booking.look import (
     readability_problems,
     sniff_image,
 )
+from main import LOGO_UPLOAD_MAX_BODY_BYTES
 
 GOOD: dict[str, Any] = {
     "accent": "#13355a",
@@ -111,6 +113,20 @@ def test_the_default_look_is_the_customer_pages_own_colours() -> None:
     assert DEFAULT_LOOK.background == colour("ink")
     assert DEFAULT_LOOK.text == colour("text")
     assert (DEFAULT_LOOK.font, DEFAULT_LOOK.corners) == ("modern", "soft")
+
+
+def test_the_logo_limits_agree_across_the_api_and_the_database() -> None:
+    """The logo limit is 100 KB. The logo route's body limit leaves room above it, and the database checks the same number.
+
+    A change to one without the others would let a logo through the API that the database then refuses, or the reverse.
+    """
+    root = Path(__file__).resolve().parent.parent
+    assert LOGO_MAX_BYTES == 100 * 1024
+    assert LOGO_UPLOAD_MAX_BODY_BYTES > LOGO_MAX_BYTES
+    assert LOGO_UPLOAD_MAX_BODY_BYTES < 2 * LOGO_MAX_BYTES
+    sql = (root / "migrations" / "0022_logo_size.sql").read_text(encoding="utf-8")
+    found = re.search("BETWEEN 1 AND ([0-9]+)", sql)
+    assert found is not None and int(found.group(1)) == LOGO_MAX_BYTES
 
 
 def test_each_readability_problem_is_named() -> None:
