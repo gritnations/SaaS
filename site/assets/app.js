@@ -3,6 +3,7 @@
 
 import { addDays, dateParts, el, fill, money, today } from "./gn.js";
 import { bookingChip, bookingLink, notice, owner, publicBusiness, startOwnerPage } from "./owner.js";
+import { hoursDone, readFlag, servicesDone, writeFlag } from "./setup-model.js";
 
 const input = (id) => document.getElementById(id);
 let tab = "upcoming";
@@ -33,11 +34,15 @@ function showHeader() {
   document.title = `Today · ${data.name}`;
 }
 
+/** The answers the set-up box was last drawn from, or null before the first drawing. */
+let setupParts = null;
+
 /**
  * Build the set-up checklist.
  * @param {{services: any, hours: any, payments: any}} parts The owner answers, or null where they failed.
  */
 function showSetup(parts) {
+  setupParts = parts;
   let shared;
   try {
     shared = localStorage.getItem(`gn_shared_${data.slug}`) === "1";
@@ -46,15 +51,15 @@ function showSetup(parts) {
   }
   const steps = [
     {
-      name: "Add your services",
+      name: "Check your services",
       note: "Names, length and price",
-      done: Array.isArray(parts.services) && parts.services.some((s) => s.active),
+      done: servicesDone(parts.services, readFlag("seen_services", data.slug)),
       href: "/app/services/",
     },
     {
-      name: "Set opening hours",
+      name: "Check your opening hours",
       note: "The days and times you take bookings",
-      done: Boolean(parts.hours && Array.isArray(parts.hours.blocks) && parts.hours.blocks.length),
+      done: hoursDone(parts.hours, readFlag("seen_hours", data.slug)),
       href: "/app/hours/",
     },
     { name: "Share your link", note: "Copy it or send it to customers", done: shared, href: "#share" },
@@ -68,6 +73,7 @@ function showSetup(parts) {
   const doneCount = steps.filter((s) => s.done).length;
   if (doneCount === steps.length) {
     input("setup").hidden = true;
+    input("setup-show").hidden = true;
     return;
   }
   input("setup-count").textContent = `${doneCount} of ${steps.length} done`;
@@ -88,7 +94,25 @@ function showSetup(parts) {
       ),
     ),
   );
-  input("setup").hidden = false;
+  const hidden = readFlag("setup_hidden", data.slug);
+  input("setup").hidden = hidden;
+  input("setup-show").hidden = !hidden;
+}
+
+/** Wire the buttons that put the set-up box away and bring it back. */
+function wireSetup() {
+  const put = (hidden, focus) => {
+    writeFlag("setup_hidden", data.slug, hidden);
+    input("setup").hidden = hidden;
+    input("setup-show").hidden = !hidden;
+    input(focus).focus();
+  };
+  input("setup-hide").addEventListener("click", () => put(true, "setup-show-btn"));
+  input("setup-show-btn").addEventListener("click", () => put(false, "setup-hide"));
+  // Coming back with the browser's Back button can show the page as it was left, so redraw the ticks.
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted && setupParts) showSetup(setupParts);
+  });
 }
 
 /**
@@ -217,6 +241,7 @@ async function start() {
   }
   showHeader();
   wireShare();
+  wireSetup();
 
   const now = today(data.zone);
   const weekday = (new Date(`${now}T12:00:00Z`).getUTCDay() + 6) % 7;

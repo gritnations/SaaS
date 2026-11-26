@@ -31,10 +31,16 @@
             <h2 id="setup-h">Get ready for bookings</h2>
             <span class="small muted" id="setup-count"></span>
           </div>
-          <span class="segments" id="setup-bar" aria-hidden="true"></span>
+          <div class="setup-side">
+            <span class="segments" id="setup-bar" aria-hidden="true"></span>
+            <button type="button" class="btn ghost small" id="setup-hide">Hide</button>
+          </div>
         </div>
         <ol class="steps-grid" id="setup-steps"></ol>
       </section>
+      <p class="setup-show" id="setup-show" hidden>
+        <button type="button" class="btn ghost small" id="setup-show-btn">Show set-up steps</button>
+      </p>
 
       <div class="grid">
         <section class="panel bookings" aria-labelledby="bk-h">

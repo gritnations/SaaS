@@ -3,6 +3,7 @@
 
 import { el, fill } from "./gn.js";
 import { notice, owner, startOwnerPage } from "./owner.js";
+import { writeFlag } from "./setup-model.js";
 
 const input = (id) => document.getElementById(id);
 /** Display order Monday first; the API numbers days 0 = Sunday to 6 = Saturday. */
@@ -309,6 +310,7 @@ async function start() {
   }
   for (const b of result.data.blocks) week[b.weekday].push({ start: b.start.slice(0, 5), end: b.end.slice(0, 5) });
   draw();
+  writeFlag("seen_hours", slug);
   input("save-hours").addEventListener("click", save);
 }
 

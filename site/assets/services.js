@@ -2,6 +2,7 @@
 
 import { el, fill } from "./gn.js";
 import { notice, owner, startOwnerPage } from "./owner.js";
+import { writeFlag } from "./setup-model.js";
 
 const input = (id) => document.getElementById(id);
 let slug = "";
@@ -94,6 +95,7 @@ async function load() {
     fill(input("svc-list"), el("p", { class: "muted" }, "Services couldn't load. Refresh the page to try again."));
     return;
   }
+  writeFlag("seen_services", slug);
   if (!result.data.length) {
     fill(input("svc-list"), el("p", { class: "muted" }, "No services yet. Add your first one below."));
     return;
