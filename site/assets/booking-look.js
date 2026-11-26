@@ -1,4 +1,4 @@
-// Owner "Booking page" screen: choose how the booking page looks (a starting theme, a logo, colours, font and
+// Owner "Page design" screen: choose how the booking page looks (a starting theme, a logo, colours, font and
 // corners), see it as customers will, save a draft, publish it or go back to the standard look.
 // All text reaches the page through textContent. A look is only ever sent to the API as the fixed fields it accepts.
 

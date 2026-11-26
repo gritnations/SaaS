@@ -16,7 +16,7 @@ const MENU = [
   ["services", "Services", "/app/services/"],
   ["hours", "Opening hours", "/app/hours/"],
   ["payments", "Payments", "/app/payments/"],
-  ["look", "Booking page", "/app/look/"],
+  ["look", "Page design", "/app/look/"],
   ["settings", "Settings", "/app/settings/"],
 ];
 

@@ -1,4 +1,4 @@
-// The "Button for your website" tab of the owner's Booking page screen: the owner picks the button's text (one of our
+// The "Button for your website" tab of the owner's Page design screen: the owner picks the button's text (one of our
 // suggestions or their own), sees it, and copies one piece of code to paste into their own website, or emails it to
 // whoever looks after that website. All text reaches the page through textContent. The code is built by
 // look-model.js, which tidies and escapes the text and checks the colours.

@@ -1000,7 +1000,7 @@ body.app {
   justify-self: start;
 }
 
-/* Booking page look editor */
+/* Page design: look editor */
 
 .look-layout {
   display: grid;
@@ -1233,7 +1233,7 @@ body.app {
   text-align: center;
 }
 
-/* Booking page: button for your website */
+/* Page design: button for your website */
 
 .look-tabs {
   align-self: flex-start;
