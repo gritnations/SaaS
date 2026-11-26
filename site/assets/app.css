@@ -239,6 +239,16 @@ body.app {
   flex-wrap: wrap;
 }
 
+.setup-side {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.setup-show {
+  margin: 0 0 16px;
+}
+
 .segments {
   display: grid;
   grid-auto-flow: column;
