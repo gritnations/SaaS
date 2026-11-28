@@ -5,7 +5,8 @@
 #
 # Also runs the Python platform checks (tests, formatting, types) on every
 # supported Python version, and the lint tooling for new platform surfaces.
-# Neither needs a database or any credential.
+# Each Python job starts its own throwaway PostgreSQL for the database tests;
+# its password is generated inside the job. No repository secret is needed.
 
 name: Tests
 
@@ -90,7 +91,47 @@ jobs:
       - run: python -m black --check main.py contracts.py mail.py postgres.py api booking payments scripts tests
       - run: python -m isort --check-only main.py contracts.py mail.py postgres.py api booking payments scripts tests
       - run: python -m mypy
-      - run: python -m pytest -q
+      - name: Start a throwaway PostgreSQL 17 with TLS
+        run: |
+          certs="$RUNNER_TEMP/postgres-certs"
+          mkdir "$certs"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -keyout "$certs/server.key" -out "$certs/server.crt"
+          chmod 644 "$certs/server.crt"
+          chmod 600 "$certs/server.key"
+          sudo chown 999:999 "$certs/server.key"  # the postgres user inside the image
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          docker run --detach --name postgres --publish 127.0.0.1:5432:5432 \
+            --env POSTGRES_PASSWORD="$password" --volume "$certs:/certs:ro" postgres:17 \
+            -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/certs/server.key
+          # Ask over TCP: the temporary server the image runs while initialising listens on a socket only.
+          for _ in $(seq 60); do
+            docker exec postgres pg_isready -h 127.0.0.1 -U postgres && break
+            sleep 1
+          done
+          docker exec postgres pg_isready -h 127.0.0.1 -U postgres || { docker logs postgres; exit 1; }
+          url="postgresql://postgres:$password@127.0.0.1:5432/postgres?sslmode=require"
+          echo "CI_DATABASE_URL=$url" >> "$GITHUB_ENV"
+      # As on Supabase, the public roles get access to new tables by default, so the migrations have to remove it.
+      - name: Create the Supabase public roles
+        run: |
+          docker exec --interactive postgres psql -U postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE anon NOLOGIN;
+          CREATE ROLE authenticated NOLOGIN;
+          GRANT USAGE ON SCHEMA public TO anon, authenticated;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated;
+          SQL
+      - name: Apply the migrations
+        run: MIGRATION_DATABASE_URL="$CI_DATABASE_URL" python -m scripts.migrate
+      - name: Run the tests, including the database tests
+        shell: bash  # with pipefail, so a failing test run fails the step
+        run: |
+          BOOKING_TEST_DATABASE_URL="$CI_DATABASE_URL" python -m pytest -q -rs | tee "$RUNNER_TEMP/pytest.log"
+          if grep -q "BOOKING_TEST_DATABASE_URL is not set" "$RUNNER_TEMP/pytest.log"; then
+            echo "::error::Database tests were skipped because BOOKING_TEST_DATABASE_URL did not reach them."
+            exit 1
+          fi
 
   lint:
     name: Lint (ESLint, Prettier, Markdown)

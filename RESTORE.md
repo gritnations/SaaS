@@ -63,7 +63,7 @@ To check the repository's migrations alone, skip steps 2 to 6: run the migration
 
 1. Two real-database tests were out of date with migrations 0016 and 0019, so they failed on any up-to-date database. Fixed on `main` (commit `635a08e`).
 2. `test_an_event_without_an_identifier_is_still_applied` counted every row in `payment_events`, so it failed on a database that already held events. Fixed: it now compares the count before and after.
-3. The real-database tests do not run in CI, which is how finding 1 went unnoticed. Still open.
+3. The real-database tests did not run in CI, which is how finding 1 went unnoticed. Fixed: each Python job now builds a throwaway PostgreSQL 17 database from the migrations and runs them. That is not a Supabase project, and the tests there connect as a superuser.
 
 ## 6. Apply migrations with the runner
 
