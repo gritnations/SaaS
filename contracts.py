@@ -414,6 +414,46 @@ def clean_note(value: str, field: str = "note", max_length: int = 1000) -> str:
     return value
 
 
+REMINDER_NOTE_MAX_LENGTH = 200
+"""The longest note a business may add to its reminders."""
+
+_LINK = re.compile(
+    r"://|\bwww\.|\b[a-z0-9-]+\.(?:com|co|uk|net|org|io|app|link|ly|me|info|biz|sa|ae|eg|xyz|shop|site|online)\b",
+    re.IGNORECASE,
+)
+"""Text a mail program would turn into a link: a scheme, ``www.`` or a name ending in a common domain."""
+
+
+def clean_reminder_note(value: str) -> str:
+    """Normalise a business's reminder note and refuse hidden characters and links.
+
+    The note goes into emails to customers, so it follows the rules for a name (one line, no hidden characters) and
+    may not contain a web or email address.
+
+    Args:
+        value: The note as typed.
+
+    Returns:
+        The cleaned note.
+
+    Raises:
+        TextRefusedError: If it breaks the name rule, is longer than :data:`REMINDER_NOTE_MAX_LENGTH` or holds a link.
+    """
+    text = clean_name(value, "reminder_note", REMINDER_NOTE_MAX_LENGTH)
+    if _LINK.search(text):
+        raise _refuse("reminder_note", "links")
+    return text
+
+
+OwnerReminderNote = Annotated[str, AfterValidator(clean_reminder_note)]
+"""A reminder note as an owner enters it: one line, up to 200 characters, no links."""
+
+StoredReminderNote = Annotated[str, StringConstraints(min_length=1, max_length=REMINDER_NOTE_MAX_LENGTH)]
+"""A reminder note, as stored. The same limits as the database."""
+
+ReminderEarlyHours = Literal[48, 72, 168]
+"""How early the earlier reminder is sent, in hours. Must equal the database's check list."""
+
 CustomerName = Annotated[str, AfterValidator(clean_name)]
 """A customer's name: normalised, 1 to 100 characters, no hidden characters."""
 

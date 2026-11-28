@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, StringConstraints, model_validator
 from booking.refunds import refund_paid_booking
 from booking.search import read_query
 from booking.service import (
+    PAID_PLANS,
     TRIAL_DAYS,
     BookingError,
     BookingNotifier,
@@ -50,11 +51,13 @@ from contracts import (
     OwnerBusinessType,
     OwnerEmail,
     OwnerName,
+    OwnerReminderNote,
     PaymentStatus,
     Plan,
     PlanStatus,
     PriceMinor,
     Reference,
+    ReminderEarlyHours,
     Role,
     ServiceName,
     ServiceSlug,
@@ -63,6 +66,7 @@ from contracts import (
     StoredEmail,
     StoredLink,
     StoredPhone,
+    StoredReminderNote,
     TimeZoneName,
     Weekday,
     WindowDays,
@@ -471,6 +475,67 @@ class SearchResult(BaseModel):
     understood: tuple[str, ...]
     bookings: tuple[OwnerBooking, ...]
     more: bool
+
+
+class ReminderSettings(BaseModel):
+    """A business's reminder settings.
+
+    Attributes:
+        early_allowed: The business's plan or trial includes the earlier reminder now.
+        day_enabled: Customers get the reminder about 24 hours before.
+        early_enabled: Customers get the earlier reminder, while the plan allows it.
+        early_hours: How early the earlier reminder is, in hours.
+        note: The note added to reminders, or ``None``.
+    """
+
+    model_config = STRICT
+
+    early_allowed: bool
+    day_enabled: bool
+    early_enabled: bool
+    early_hours: ReminderEarlyHours
+    note: StoredReminderNote | None
+
+
+class ReminderChanges(BaseModel):
+    """Changes to the reminder settings. Only the fields given are changed.
+
+    Attributes:
+        day_enabled: Send the 24-hour reminder.
+        early_enabled: Send the earlier reminder.
+        early_hours: How early the earlier reminder is, in hours.
+        note: The note for reminders; ``None`` clears it.
+    """
+
+    model_config = STRICT
+
+    day_enabled: bool | None = None
+    early_enabled: bool | None = None
+    early_hours: ReminderEarlyHours | None = None
+    note: OwnerReminderNote | None = None
+
+    @model_validator(mode="after")
+    def check_clearing(self) -> "ReminderChanges":
+        """Refuse ``None`` for anything but the note.
+
+        Returns:
+            The changes.
+
+        Raises:
+            ValueError: If a switch or the timing is given as ``None``.
+        """
+        for name in sorted(self.model_fields_set - {"note"}):
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be cleared")
+        return self
+
+
+_REMINDER_COLUMNS = {
+    "day_enabled": "reminder_day_enabled",
+    "early_enabled": "reminder_early_enabled",
+    "early_hours": "reminder_early_hours",
+    "note": "reminder_note",
+}
 
 
 class OwnerService:
@@ -1101,6 +1166,71 @@ class OwnerService:
                 )
                 business = self._member_business(connection, account, slug)
             return self._settings(connection, business)
+
+    @staticmethod
+    def _reminder_settings(connection: psycopg.Connection[Any], business: Business) -> ReminderSettings:
+        """Read the reminder settings of a loaded business.
+
+        Args:
+            connection: An open connection.
+            business: The business.
+
+        Returns:
+            Its reminder settings, and whether its plan includes the earlier reminder.
+        """
+        row: Any = connection.execute(
+            "SELECT (plan = ANY(%s::text[]) OR COALESCE(trial_ends_at > now(), false)), reminder_day_enabled, "
+            "reminder_early_enabled, reminder_early_hours::int, reminder_note FROM businesses WHERE id = %s",
+            (list(PAID_PLANS), business.id),
+        ).fetchone()
+        return from_row(ReminderSettings, row)
+
+    def reminder_settings(self, account: str, slug: str) -> ReminderSettings:
+        """Read a business's reminder settings.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+
+        Returns:
+            The settings.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+        """
+        with self._database.connection() as connection:
+            return self._reminder_settings(connection, self._member_business(connection, account, slug))
+
+    def update_reminder_settings(self, account: str, slug: str, changes: ReminderChanges) -> ReminderSettings:
+        """Change some reminder settings. Reminders not yet sent follow the new settings.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+            changes: The fields to change, checked by the record.
+
+        Returns:
+            The updated settings.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+            InvalidChangeError: If the earlier reminder is changed on a plan that does not include it. Nothing is
+                changed.
+        """
+        given = changes.model_fields_set
+        fields = [name for name in _REMINDER_COLUMNS if name in given]
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            current = self._reminder_settings(connection, business)
+            if not current.early_allowed and given & {"early_enabled", "early_hours"}:
+                raise InvalidChangeError("The earlier reminder is part of the paid plans. Upgrade to change it.")
+            if fields:
+                assignments = ", ".join(f"{_REMINDER_COLUMNS[name]} = %s" for name in fields)
+                connection.execute(
+                    f"UPDATE businesses SET {assignments} WHERE id = %s",
+                    (*(getattr(changes, name) for name in fields), business.id),
+                )
+            return self._reminder_settings(connection, business)
 
     def cancel_booking(self, account: str, slug: str, reference: str) -> tuple[Business, OwnerBooking]:
         """Cancel a booking on the business's behalf. No deadline applies; the customer is emailed.

@@ -8,7 +8,7 @@ Who receives what:
     * ``confirmed``: the customer (details, calendar file, manage link) and the business's contact email.
     * ``cancelled``: the customer, and the business unless the business cancelled it itself.
     * ``moved``: the customer (new time, updated calendar file, manage link) and the business.
-    * ``reminder``: the customer only, about 24 hours before, sent by ``booking.reminders``. It has no manage
+    * ``reminder`` and ``reminder_early``: the customer only; the first about 24 hours before, sent by ``booking.reminders``. It has no manage
       link, because only the link's hash is stored; it points to the link in the confirmation email.
 
 Every value that came from a person is HTML-escaped before it is placed in an HTML body. The log holds no
@@ -42,6 +42,7 @@ from contracts import (
     StoredEmail,
     StoredLink,
     StoredPhone,
+    StoredReminderNote,
     TimeZoneName,
 )
 from mail import Attachment, Mailer, MailError, Message, has_controls
@@ -52,6 +53,9 @@ LOGGER = logging.getLogger(__name__)
 SITE_URL_ENV = "PUBLIC_SITE_URL"
 _SITE_PATTERN = re.compile(SITE_URL_PATTERN)
 KINDS: tuple[str, ...] = get_args(EventKind)
+
+ReminderKind = Literal["reminder", "reminder_early"]
+"""The 24-hour reminder, or the earlier one. Values of ``email_log.kind``."""
 
 ReminderOutcome = Literal["sent", "skipped", "failed", "dropped"]
 """What happened to one reminder: see :meth:`Notifier.reminder`."""
@@ -85,6 +89,7 @@ class Context(BaseModel):
         payment_status: ``not_required``, ``awaiting``, ``paid``, ``at_venue`` or ``refunded``.
         price_minor: The booking's price in minor units.
         currency: The business's ISO 4217 currency.
+        reminder_note: The business's note for its reminders, or ``None``.
     """
 
     model_config = STRICT
@@ -109,6 +114,7 @@ class Context(BaseModel):
     payment_status: PaymentStatus = "not_required"
     price_minor: Annotated[int, Field(ge=0)] = 0
     currency: Currency = "GBP"
+    reminder_note: StoredReminderNote | None = None
 
 
 def manage_url(site_url: str, slug: str, reference: str, token: str) -> str:
@@ -377,6 +383,8 @@ def reminder_message(context: Context) -> Message:
         rows.append(venue)
     if context.meeting_link:
         rows.append(("Meeting link", context.meeting_link))
+    if context.reminder_note:
+        rows.append((f"Note from {context.business_name}", context.reminder_note))
     title = "See you soon"
     intro = f"Hello {context.customer_name}, this is a reminder of your booking with {context.business_name}."
     footer = (
@@ -455,7 +463,7 @@ def site_url_from_environment(environ: Mapping[str, str], name: str = SITE_URL_E
 _CONTEXT_QUERY = (
     "SELECT b.business_id::text, z.name, z.slug, z.time_zone, z.contact_email, z.meeting_link, b.reference, s.name, "
     "b.starts_at, b.ends_at, b.customer_name, b.customer_email, b.customer_phone, b.customer_note, b.cancelled_by, "
-    "b.move_count, b.payment_status, b.price_minor, z.currency "
+    "b.move_count, b.payment_status, b.price_minor, z.currency, z.reminder_note "
     "FROM bookings b JOIN businesses z ON z.id = b.business_id JOIN services s ON s.id = b.service_id "
     "WHERE b.id = %s"
 )
@@ -522,6 +530,7 @@ class Notifier:
             payment_status=row[16],
             price_minor=int(row[17]),
             currency=str(row[18]).strip(),
+            reminder_note=row[19],
         )
         return str(row[0]), context
 
@@ -593,11 +602,12 @@ class Notifier:
                 continue
             self._record(business_id, booking_id, kind, role, "sent", provider_id, "")
 
-    def reminder(self, booking_id: str) -> ReminderOutcome:
+    def reminder(self, booking_id: str, kind: ReminderKind = "reminder") -> ReminderOutcome:
         """Send one booking's reminder to its customer and record the attempt. Never raises.
 
         Args:
             booking_id: The booking.
+            kind: Which reminder this is, for the email log.
 
         Returns:
             ``sent``; ``skipped`` when email is not configured; ``failed`` when the booking could not be read, its
@@ -616,20 +626,20 @@ class Notifier:
             message = reminder_message(context)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("reminder message refused (%s)", type(exc).__name__)
-            self._record(business_id, booking_id, "reminder", "customer", "failed", "", "message refused")
+            self._record(business_id, booking_id, kind, "customer", "failed", "", "message refused")
             return "failed"
         if self._mailer is None:
-            self._record(business_id, booking_id, "reminder", "customer", "skipped", "", "email not configured")
+            self._record(business_id, booking_id, kind, "customer", "skipped", "", "email not configured")
             return "skipped"
         try:
             provider_id = self._mailer.send(message)
         except MailError as exc:
             LOGGER.warning("reminder email failed: %s", exc)
-            self._record(business_id, booking_id, "reminder", "customer", "failed", "", str(exc))
+            self._record(business_id, booking_id, kind, "customer", "failed", "", str(exc))
             return "failed"
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("reminder email failed (%s)", type(exc).__name__)
-            self._record(business_id, booking_id, "reminder", "customer", "failed", "", type(exc).__name__)
+            self._record(business_id, booking_id, kind, "customer", "failed", "", type(exc).__name__)
             return "failed"
-        self._record(business_id, booking_id, "reminder", "customer", "sent", provider_id, "")
+        self._record(business_id, booking_id, kind, "customer", "sent", provider_id, "")
         return "sent"
