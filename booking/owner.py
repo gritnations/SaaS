@@ -22,6 +22,7 @@ from psycopg import errors
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from booking.refunds import refund_paid_booking
+from booking.search import read_query
 from booking.service import (
     TRIAL_DAYS,
     BookingError,
@@ -72,6 +73,9 @@ from postgres import Database
 
 MAX_DAYS_PER_REQUEST = 62
 """The most days one bookings request may cover."""
+
+MAX_SEARCH_RESULTS = 50
+"""The most bookings one search returns."""
 
 MAX_BLOCKS = 50
 """The most working blocks a business may have across the week."""
@@ -446,6 +450,27 @@ _BOOKING_COLUMNS = (
     "b.customer_email, b.customer_phone, b.customer_note, b.created_at, b.payment_status"
 )
 _SERVICE_COLUMNS = "slug, name, duration_minutes, price_minor, active, sort_order"
+_LISTED = (
+    "NOT (b.status = 'expired' AND b.payment_status <> 'paid') "
+    "AND NOT (b.status = 'pending_payment' AND b.hold_expires_at <= now())"
+)
+"""Which bookings owners are shown: holds that ran out unpaid are left out."""
+
+
+class SearchResult(BaseModel):
+    """What a search of a business's bookings found.
+
+    Attributes:
+        understood: How the search text was read, one line for each condition.
+        bookings: Upcoming bookings first, soonest first, then past ones, latest first.
+        more: Whether further bookings matched beyond :data:`MAX_SEARCH_RESULTS`.
+    """
+
+    model_config = STRICT
+
+    understood: tuple[str, ...]
+    bookings: tuple[OwnerBooking, ...]
+    more: bool
 
 
 class OwnerService:
@@ -643,8 +668,7 @@ class OwnerService:
             rows = connection.execute(
                 f"SELECT {_BOOKING_COLUMNS} FROM bookings b JOIN services s ON s.id = b.service_id "
                 "WHERE b.business_id = %s AND b.starts_at >= %s AND b.starts_at < %s "
-                "AND NOT (b.status = 'expired' AND b.payment_status <> 'paid') "
-                "AND NOT (b.status = 'pending_payment' AND b.hold_expires_at <= now()) ORDER BY b.starts_at",
+                f"AND {_LISTED} ORDER BY b.starts_at",
                 (business.id, period_start, period_end),
             ).fetchall()
         return business, [from_row(OwnerBooking, row) for row in rows]
@@ -677,6 +701,74 @@ class OwnerService:
         if row is None:
             raise NotFoundError("Booking not found.")
         return business, from_row(OwnerBooking, row)
+
+    def search_bookings(self, account: str, slug: str, query: str) -> tuple[Business, SearchResult]:
+        """Search all of a business's bookings, past and future, from what the owner typed.
+
+        The text is read by :func:`booking.search.read_query`. Everything taken from it reaches the database as a
+        query parameter, never as part of the statement.
+
+        Args:
+            account: The verified account identifier.
+            slug: The business's public identifier.
+            query: The search text. Its length and characters are validated by the API.
+
+        Returns:
+            The business and what was found. Holds that ran out unpaid are left out, unless the search names
+            their reference.
+
+        Raises:
+            NotFoundError: If the account does not manage the business.
+        """
+        with self._database.connection() as connection:
+            business = self._member_business(connection, account, slug)
+            zone = business.zone
+            offered = connection.execute(
+                "SELECT slug, name FROM services WHERE business_id = %s ORDER BY sort_order, name", (business.id,)
+            ).fetchall()
+            plan = read_query(query, [(str(row[0]), str(row[1])) for row in offered], datetime.now(zone).date())
+            conditions = ["b.business_id = %s"]
+            values: list[object] = [business.id]
+            references = [text.upper() for text in plan.texts if REFERENCE_PATTERN.match(text.upper())]
+            conditions.append(f"(({_LISTED}) OR b.reference = ANY(%s::text[]))")
+            values.append(references)
+            if plan.services:
+                conditions.append("s.slug = ANY(%s::text[])")
+                values.append(list(plan.services))
+            if plan.days:
+                ranges = " OR ".join("(b.starts_at >= %s AND b.starts_at < %s)" for _ in plan.days)
+                conditions.append(f"({ranges})")
+                for days in plan.days:
+                    values.append(datetime.combine(days.first, time.min, zone))
+                    values.append(datetime.combine(days.last + timedelta(days=1), time.min, zone))
+            if plan.statuses:
+                conditions.append("b.status = ANY(%s::text[])")
+                values.append(list(plan.statuses))
+            if plan.timing:
+                conditions.append("b.starts_at >= now()" if plan.timing == "upcoming" else "b.starts_at < now()")
+            for email in plan.emails:
+                conditions.append("position(lower(%s::text) in lower(b.customer_email)) > 0")
+                values.append(email)
+            for start in plan.name_starts:
+                conditions.append("starts_with(lower(b.customer_name), lower(%s::text))")
+                values.append(start)
+            for text in plan.texts:
+                conditions.append(
+                    "(position(lower(%s::text) in lower(b.customer_name)) > 0 "
+                    "OR position(lower(%s::text) in lower(s.name)) > 0 OR b.reference = upper(%s::text))"
+                )
+                values.extend((text, text, text))
+            rows = connection.execute(
+                f"SELECT {_BOOKING_COLUMNS} FROM bookings b JOIN services s ON s.id = b.service_id "
+                f"WHERE {' AND '.join(conditions)} "
+                "ORDER BY b.starts_at < now(), CASE WHEN b.starts_at >= now() THEN b.starts_at END, "
+                "b.starts_at DESC LIMIT %s",
+                (*values, MAX_SEARCH_RESULTS + 1),
+            ).fetchall()
+        found = tuple(from_row(OwnerBooking, row) for row in rows[:MAX_SEARCH_RESULTS])
+        return business, SearchResult(
+            understood=tuple(plan.understood()), bookings=found, more=len(rows) > MAX_SEARCH_RESULTS
+        )
 
     def services(self, account: str, slug: str) -> list[OwnerServiceRecord]:
         """List all services of the business, active or not.

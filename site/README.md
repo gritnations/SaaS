@@ -12,7 +12,7 @@ launched. They are not served by the API's host; the customer pages in `public/`
 | `signup/`       | Owner sign-up.                                                            |
 | `signin/`       | Owner sign-in, forgotten password and new password.                       |
 | `app/`          | Owner Today screen.                                                       |
-| `app/bookings/` | Bookings: by day, look-up by reference, details, cancel.                  |
+| `app/bookings/` | Bookings: by day, search across all, details, cancel.                     |
 | `app/services/` | Services: edit and add.                                                   |
 | `app/hours/`    | Opening hours: weekly editor, and days off (a day or a run of days).       |
 | `app/settings/` | Business details, customer contact details and booking rules.             |

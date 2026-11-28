@@ -790,12 +790,29 @@ body.app {
   overflow: hidden;
 }
 
-.found-head {
+.lookup > p {
+  margin: 0;
+}
+
+.lookup > p:empty {
+  display: none;
+}
+
+.understood {
   display: flex;
-  align-items: center;
-  gap: 10px;
   flex-wrap: wrap;
-  padding: 12px 20px;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.understood li {
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 100px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 /* Services */
