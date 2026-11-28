@@ -23,6 +23,7 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    SearchResult,
     ServiceChanges,
     Settings,
     SettingsChanges,
@@ -176,6 +177,20 @@ class FakeOwners:
         """
         self._record("booking_by_reference", account, slug, reference)
         return BUSINESS, BOOKING
+
+    def search_bookings(self, account: str, slug: str, query: str) -> tuple[Business, SearchResult]:
+        """Find the booking.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+            query: Search text.
+
+        Returns:
+            The business and the result.
+        """
+        self._record("search_bookings", account, slug, query)
+        return BUSINESS, SearchResult(understood=("Name starts with: Sam",), bookings=(BOOKING,), more=False)
 
     def services(self, account: str, slug: str) -> list[OwnerServiceRecord]:
         """Return one service.
@@ -446,6 +461,54 @@ def test_malformed_references_are_rejected(reference: str) -> None:
     """Only 10 letters or digits reach the service."""
     response = signed_in().get(f"/owner/businesses/example/bookings/{reference}", headers=GOOD)
     assert response.status_code in (404, 422)
+
+
+SEARCH = "/owner/businesses/example/bookings/search"
+
+
+def test_a_search_passes_the_typed_text_and_answers_in_local_time() -> None:
+    """The text is trimmed and passed on; results look like listed bookings, with what was understood."""
+    owners = FakeOwners()
+    response = signed_in(owners).post(SEARCH, headers=GOOD, json={"query": "  Sam*  "})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["understood"] == ["Name starts with: Sam"]
+    assert (body["bookings"][0]["time"], body["more"], body["time_zone"]) == ("09:30", False, "Europe/London")
+    assert owners.calls == [("search_bookings", (ACCOUNT, "example", "Sam*"))]
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"query": ""},
+        {"query": "   "},
+        {"query": "x" * 201},
+        {"query": "a\u0000b"},
+        {"query": "a\nb"},
+        {"query": 7},
+        {"query": "Sam", "business": "other"},
+    ],
+)
+def test_unusable_searches_are_rejected(body: dict[str, Any]) -> None:
+    """Empty, overlong, control characters and extra fields never reach the service."""
+    owners = FakeOwners()
+    assert signed_in(owners).post(SEARCH, headers=GOOD, json=body).status_code == 422
+    assert owners.calls == []
+
+
+def test_searching_needs_a_valid_token() -> None:
+    """Without sign-in nothing is searched."""
+    owners = FakeOwners()
+    assert signed_in(owners).post(SEARCH, json={"query": "Sam"}).status_code == 401
+    assert owners.calls == []
+
+
+def test_searching_a_business_that_is_not_yours_finds_nothing() -> None:
+    """The answer is the same as for a business that does not exist."""
+    owners = FakeOwners(fail_with=NotFoundError("Business not found."))
+    assert signed_in(owners).post(SEARCH, headers=GOOD, json={"query": "Sam"}).status_code == 404
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-// Owner Bookings screen: bookings by day in two-week pages, look-up by reference, details and cancelling.
+// Owner Bookings screen: bookings by day in two-week pages, searching all bookings, details and cancelling.
 // All text reaches the page through textContent.
 
 import { addDays, dateParts, el, fill, money, today } from "./gn.js";
@@ -10,6 +10,8 @@ const REFERENCE = /^[A-Za-z0-9]{10}$/;
 const PLAIN_EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 const input = (id) => document.getElementById(id);
 const data = { slug: "", currency: "GBP", zone: "Europe/London", start: "", bookings: [], filter: "all", open: "" };
+/** The search on screen. `asked` numbers each request, so that a slow answer cannot replace a newer one. */
+const search = { query: "", bookings: [], understood: [], more: false, open: "", asked: 0 };
 
 /**
  * Format an instant in the business's time zone.
@@ -89,8 +91,7 @@ function details(b) {
       const result = await owner(`/businesses/${data.slug}/bookings/${b.reference}/cancel`, { method: "POST" });
       if (result.status === 200) {
         notice("app-msg", `Cancelled ${b.reference}. The customer has been emailed.`, true);
-        data.open = b.reference;
-        await load();
+        await Promise.all([load(), search.query ? runSearch(search.query) : null]);
         return;
       }
       confirm.disabled = false;
@@ -108,21 +109,27 @@ function details(b) {
 /**
  * One booking row that opens its details.
  * @param {object} b The booking.
+ * @param {{open: string}} view The list the row belongs to, which remembers the open booking.
+ * @param {() => void} redraw Draws that list again.
  * @returns {HTMLElement} The row and its details.
  */
-function row(b) {
-  const open = data.open === b.reference;
+function row(b, view, redraw) {
+  const open = view.open === b.reference;
   const wrap = el("div", { class: "bk-item" });
   const button = el(
     "button",
-    { type: "button", class: "bk-row as-button", "aria-expanded": String(open) },
+    { type: "button", class: "bk-row as-button", "aria-expanded": String(open), "data-ref": b.reference },
     el("span", { class: "bk-time" }, b.time),
     el("span", { class: "who" }, el("strong", {}, b.customer_name), el("span", {}, b.service_name)),
     el("span", { class: "meta" }, bookingChip(b, data.currency), el("span", { class: "ref" }, b.reference)),
   );
   button.addEventListener("click", () => {
-    data.open = open ? "" : b.reference;
-    showList();
+    view.open = open ? "" : b.reference;
+    redraw();
+    // The list is rebuilt, so put keyboard focus back on the same booking.
+    const again = [...document.querySelectorAll(`[data-ref="${b.reference}"]`)];
+    const inSearch = view === search;
+    again.find((found) => input("search-result").contains(found) === inSearch)?.focus();
   });
   wrap.append(button);
   if (open) wrap.append(details(b));
@@ -153,17 +160,30 @@ function showList() {
     fill(input("bk-list"), el("p", { class: "pad muted" }, "No bookings to show for these two weeks."));
     return;
   }
+  fill(input("bk-list"), ...dayRows(rows, data, showList));
+}
+
+/**
+ * Booking rows with a heading for each day.
+ * @param {object[]} bookings The bookings, in the order to show them.
+ * @param {{open: string}} view The list they belong to.
+ * @param {() => void} redraw Draws that list again.
+ * @param {boolean} [withYear] Whether the headings name the year.
+ * @returns {HTMLElement[]} Headings and rows.
+ */
+function dayRows(bookings, view, redraw, withYear = false) {
   const parts = [];
   let current = "";
-  for (const b of rows) {
+  for (const b of bookings) {
     if (b.date !== current) {
       current = b.date;
       const p = dateParts(b.date);
-      parts.push(el("div", { class: "day-label" }, `${p.dow} ${p.day} ${p.month}`));
+      const year = withYear ? ` ${b.date.slice(0, 4)}` : "";
+      parts.push(el("div", { class: "day-label" }, `${p.dow} ${p.day} ${p.month}${year}`));
     }
-    parts.push(row(b));
+    parts.push(row(b, view, redraw));
   }
-  fill(input("bk-list"), ...parts);
+  return parts;
 }
 
 /** Load the current two weeks. */
@@ -179,46 +199,62 @@ async function load() {
   showList();
 }
 
+/** Draw what the last search found. */
+function showSearch() {
+  const count = search.bookings.length;
+  input("search-status").textContent = search.more
+    ? `Showing the first ${count}. Add a name, service or date to narrow it.`
+    : count === 0
+      ? "No bookings match."
+      : `${count} ${count === 1 ? "booking" : "bookings"} found.`;
+  const read = search.understood.length ? search.understood : ["All bookings"];
+  const parts = [
+    el("ul", { class: "understood", "aria-label": "Searched for" }, ...read.map((line) => el("li", {}, line))),
+  ];
+  if (count) parts.push(el("div", { class: "found" }, ...dayRows(search.bookings, search, showSearch, true)));
+  fill(input("search-result"), ...parts);
+}
+
+/** Take the search off the screen. Any answer still on its way is ignored. */
+function clearSearch() {
+  search.asked += 1;
+  Object.assign(search, { query: "", bookings: [], understood: [], more: false, open: "" });
+  input("search-status").textContent = "";
+  fill(input("search-result"));
+  input("search-clear").hidden = true;
+}
+
 /**
- * Look a booking up by reference and show it.
- * @param {string} reference The reference.
+ * Search all bookings and show the answer. The text travels in the request body, never in an address.
+ * @param {string} typed What the owner typed.
  */
-async function lookUp(reference) {
-  const wanted = reference.trim().toUpperCase();
-  if (!REFERENCE.test(wanted)) {
-    fill(input("look-result"), el("p", { class: "error" }, "A reference has 10 letters and numbers, like H49FV82SPR."));
+async function runSearch(typed) {
+  const query = typed.trim();
+  if (!query) {
+    clearSearch();
     return;
   }
-  fill(input("look-result"), el("p", { class: "loading" }, "Looking…"));
-  const result = await owner(`/businesses/${data.slug}/bookings/${wanted}`);
-  if (result.status === 200 && result.data) {
-    const b = result.data;
-    data.open = b.reference;
-    fill(
-      input("look-result"),
-      el(
-        "div",
-        { class: "found" },
-        el(
-          "div",
-          { class: "found-head" },
-          el("strong", {}, b.customer_name),
-          bookingChip(b, data.currency),
-          el("span", { class: "ref" }, b.reference),
-        ),
-        details(b),
-      ),
-    );
+  const asked = (search.asked += 1);
+  // An earlier search's results must not sit under new text while the answer is on its way.
+  if (query !== search.query) fill(input("search-result"));
+  search.query = query;
+  input("search-clear").hidden = false;
+  input("search-status").textContent = "Searching…";
+  const result = await owner(`/businesses/${data.slug}/bookings/search`, { method: "POST", body: { query } });
+  if (asked !== search.asked) return;
+  if (result.status !== 200 || !result.data || !Array.isArray(result.data.bookings)) {
+    search.bookings = [];
+    fill(input("search-result"));
+    input("search-status").textContent = "The search couldn't run right now. Please try again.";
     return;
   }
-  fill(
-    input("look-result"),
-    el(
-      "p",
-      { class: "error" },
-      result.status === 404 ? "No booking with that reference." : "The booking couldn't be loaded. Try again.",
-    ),
-  );
+  data.zone = result.data.time_zone || data.zone;
+  search.bookings = result.data.bookings;
+  search.understood = result.data.understood || [];
+  search.more = Boolean(result.data.more);
+  // A single result opens by itself, and a booking already open stays open.
+  if (search.bookings.length === 1) search.open = search.bookings[0].reference;
+  showSearch();
 }
 
 /** Start the page. */
@@ -250,14 +286,20 @@ async function start() {
       showList();
     });
   }
-  input("look-form").addEventListener("submit", (event) => {
+  input("search-form").addEventListener("submit", (event) => {
     event.preventDefault();
-    lookUp(input("look-ref").value);
+    search.open = "";
+    runSearch(input("search-text").value);
+  });
+  input("search-clear").addEventListener("click", () => {
+    input("search-text").value = "";
+    clearSearch();
+    input("search-text").focus();
   });
   const fromLink = location.hash.slice(1);
   if (REFERENCE.test(fromLink)) {
-    input("look-ref").value = fromLink;
-    lookUp(fromLink);
+    input("search-text").value = fromLink;
+    runSearch(fromLink);
   }
   await load();
 }

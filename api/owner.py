@@ -8,6 +8,8 @@ Routes:
     * ``GET /owner/me``: the businesses the account manages.
     * ``GET /owner/businesses/{business}/bookings``: bookings with customer details for a run of days.
     * ``GET /owner/businesses/{business}/bookings/{reference}``: one booking by reference.
+    * ``POST /owner/businesses/{business}/bookings/search``: search all bookings from typed text. A POST, so
+      that customer names and email addresses stay out of web addresses and the logs that record them.
     * ``GET`` and ``POST /owner/businesses/{business}/services``; ``PATCH .../services/{service}``.
     * ``GET`` and ``PUT /owner/businesses/{business}/hours``.
     * ``GET`` and ``PATCH /owner/businesses/{business}/settings``.
@@ -16,6 +18,7 @@ Routes:
 Responses carry customer details, so the ingress boundary's ``Cache-Control: no-store`` applies.
 """
 
+import unicodedata
 from collections.abc import Callable
 from datetime import date, datetime, time
 from functools import partial
@@ -41,6 +44,7 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    SearchResult,
     ServiceChanges,
     Settings,
     SettingsChanges,
@@ -48,6 +52,7 @@ from booking.owner import (
 )
 from booking.payments import InvalidOptionsError, PaymentsBackend, PaymentSettings, PlanRequiredError
 from booking.refunds import RefundUnavailableError
+from booking.search import MAX_QUERY_LENGTH
 from booking.service import Business, NotFoundError
 from contracts import (
     SERVICE_SLUG_PATTERN,
@@ -112,6 +117,19 @@ class OwnerBackend(Protocol):
 
         Returns:
             The business and the booking.
+        """
+        ...
+
+    def search_bookings(self, account: str, slug: str, query: str) -> tuple[Business, SearchResult]:
+        """See :meth:`booking.owner.OwnerService.search_bookings`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+            query: The search text.
+
+        Returns:
+            The business and what was found.
         """
         ...
 
@@ -428,6 +446,55 @@ class BookingsOut(BaseModel):
 
     time_zone: str
     bookings: list[OwnerBookingOut]
+
+
+class SearchOut(BaseModel):
+    """The answer to a bookings search.
+
+    Attributes:
+        time_zone: IANA time zone that dates and times are in.
+        understood: How the search text was read, one line for each condition. Empty for every booking.
+        bookings: Upcoming bookings first, then past ones, latest first.
+        more: Whether further bookings matched than are listed.
+    """
+
+    time_zone: str
+    understood: list[str]
+    bookings: list[OwnerBookingOut]
+    more: bool
+
+
+def _search_text(value: str) -> str:
+    """Refuse characters that cannot be typed into a search box or stored in the database.
+
+    Args:
+        value: The text.
+
+    Returns:
+        The same text.
+
+    Raises:
+        ValueError: If it holds a control character or half of a character.
+    """
+    if any(unicodedata.category(character) in ("Cc", "Cs") for character in value):
+        raise ValueError("The search holds characters that are not allowed.")
+    return value
+
+
+class SearchBody(BaseModel):
+    """What the owner typed into the search box.
+
+    Attributes:
+        query: A service, a date, a name, ``Name*``, an email address, a status or a reference.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_QUERY_LENGTH),
+        AfterValidator(_search_text),
+    ]
 
 
 class ServiceRecordOut(BaseModel):
@@ -1179,6 +1246,26 @@ def build_router(
         """
         found, item = answer(lambda: service().booking_by_reference(who, business, reference))
         return _booking_out(found, item)
+
+    @router.post("/businesses/{business}/bookings/search", response_model=SearchOut)
+    def search_bookings(who: Account, business: Slug, body: SearchBody) -> SearchOut:
+        """Search all bookings, past and future, from typed text.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            body: What the owner typed.
+
+        Returns:
+            What was understood and the bookings found.
+        """
+        found, result = answer(lambda: service().search_bookings(who, business, body.query))
+        return SearchOut(
+            time_zone=found.time_zone,
+            understood=list(result.understood),
+            bookings=[_booking_out(found, item) for item in result.bookings],
+            more=result.more,
+        )
 
     @router.get("/businesses/{business}/services", response_model=list[ServiceRecordOut])
     def list_services(who: Account, business: Slug) -> list[ServiceRecordOut]:
