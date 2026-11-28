@@ -4,7 +4,7 @@
 
 **State described:** `main` at `b8790ea`; database migrations 0001 to 0019, all applied to the staging database; Stripe in test mode only. Nothing here describes a production system, because none exists yet. The subscription rows were added later, with the change that reads the subscription back from the provider; the rest was not re-checked then.
 
-**How to read the evidence column.** _Code_ means read in the source. _Test_ means covered by an automated test. _Real-DB_ means a test run against the staging PostgreSQL database; these do not run in CI. _Live_ means observed on the deployed API. _Inferred_ means concluded from the code but not observed. Anything not marked was not checked.
+**How to read the evidence column.** _Code_ means read in the source. _Test_ means covered by an automated test. _Real-DB_ means a test run against the staging PostgreSQL database. CI also runs the real-database tests, on a throwaway PostgreSQL database. _Live_ means observed on the deployed API. _Inferred_ means concluded from the code but not observed. Anything not marked was not checked.
 
 ## 1. What a repeat does, per operation
 
@@ -49,7 +49,7 @@
 
 1. **Apply a migration before the code that uses it runs.** The event record (0017) and the idempotency key (0018) are written by the code on every relevant event or booking. A migration that is additive and unused by the older code is safe to apply first. One change (0017) was merged before its migration was applied; the window's effect was not observed.
 2. **A migration is one atomic statement.** From 0016 on, the change and its ledger row are in one `DO` block. A test enforces that each file records itself.
-3. **Real-database tests are the evidence for these paths, and they do not run in CI.** CI runs the unit tests and checks only. A reviewer who relies on CI alone has not seen these tests run.
+3. **Real-database tests are the evidence for these paths.** CI runs them on a throwaway PostgreSQL 17 database built from the migrations. A passing CI run says nothing about the hosted database.
 
 ## 4. Not verified, and open
 
