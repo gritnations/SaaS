@@ -379,6 +379,7 @@ ROUTES: list[tuple[str, str, dict[str, Any] | None]] = [
     ("get", "/owner/me", None),
     ("get", "/owner/businesses/example/bookings?start=2026-10-19", None),
     ("get", "/owner/businesses/example/bookings/ZA2JBN2C5B", None),
+    ("post", "/owner/businesses/example/bookings/search", {"query": "Sam"}),
     ("get", "/owner/businesses/example/services", None),
     ("post", "/owner/businesses/example/services", {"slug": "x1", "name": "X", "duration_minutes": 30}),
     ("patch", "/owner/businesses/example/services/intro", {"name": "Y"}),
