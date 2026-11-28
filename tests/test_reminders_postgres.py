@@ -10,11 +10,16 @@ late, cancelled, unpaid or already started get none; a moved booking is reminded
 or a message that cannot be built, is retried up to the limit; a booking another run holds is skipped, not claimed
 twice; email that is not configured is recorded once and not retried; a real move records its time; and the run
 works with only the API role's privileges.
+
+For the earlier reminder: only a paid plan or a trial gets it; it follows the business's switch and timing; it is not
+sent once the booking is close to the 24-hour one; each reminder is claimed, retried and recorded separately; the
+business's note is in the email; and an owner cannot change the earlier reminder on a plan without it.
 """
 
 import os
 import secrets
 import string
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -25,7 +30,9 @@ from test_manage_postgres import URL_ENV, RecordingMailer, World, book, world  #
 
 from booking import notify
 from booking.notify import Notifier
+from booking.owner import InvalidChangeError, OwnerService, ReminderChanges
 from booking.reminders import _CLAIM, BATCH_SIZE, MAX_ATTEMPTS, REMINDER_LEAD, ReminderService
+from booking.service import NotFoundError
 from postgres import Database, DatabaseSettings
 
 pytestmark = pytest.mark.skipif(not os.environ.get(URL_ENV), reason=f"{URL_ENV} is not set")
@@ -382,3 +389,199 @@ def test_a_refused_message_is_retried_and_sent_once_it_builds(shop: Shop, monkey
     shop.reminders.run()
     assert len(reminded(shop)) == 1
     assert logged(shop) == [("reminder", "customer", "failed"), ("reminder", "customer", "sent")]
+
+
+def set_business(shop: Shop, **values: object) -> None:
+    """Change columns of the test business.
+
+    Args:
+        shop: The test business.
+        **values: Column names and their new values.
+    """
+    assignments = ", ".join(f"{name} = %s" for name in values)
+    with shop.database.connection() as connection:
+        connection.execute(f"UPDATE businesses SET {assignments} WHERE id = %s", (*values.values(), shop.business_id))
+
+
+def early(shop: Shop, booking_id: str) -> tuple[bool, int, bool, bool]:
+    """Read both reminders' state for a booking.
+
+    Args:
+        shop: The test business.
+        booking_id: The booking.
+
+    Returns:
+        Whether the earlier reminder is claimed, its attempts, and whether each of the earlier and the 24-hour
+        reminders is recorded as sent.
+    """
+    with shop.database.connection() as connection:
+        row = connection.execute(
+            "SELECT reminder_early_starts_at IS NOT NULL, reminder_early_attempts, "
+            "reminder_early_sent_at IS NOT NULL, reminder_sent_at IS NOT NULL FROM bookings WHERE id = %s",
+            (booking_id,),
+        ).fetchone()
+    assert row is not None
+    return bool(row[0]), int(row[1]), bool(row[2]), bool(row[3])
+
+
+def test_a_free_business_gets_only_the_24_hour_reminder(shop: Shop) -> None:
+    """The earlier reminder is switched on by default but the free plan does not include it."""
+    soon = add(shop, 23 * HOUR, booked_ago=10 * DAY)
+    later = add(shop, 71 * HOUR, booked_ago=10 * DAY)
+    shop.reminders.run()
+    assert len(reminded(shop)) == 1
+    assert early(shop, soon) == (False, 0, False, True)
+    assert early(shop, later) == (False, 0, False, False)
+
+
+@pytest.mark.parametrize("plan", ["starter", "pro", "trial"])
+def test_a_paid_plan_or_trial_gets_the_earlier_reminder_once(shop: Shop, plan: str) -> None:
+    """A booking just under 72 hours away is reminded once, and recorded as sent."""
+    if plan == "trial":
+        set_business(shop, trial_ends_at=datetime.now(UTC) + DAY)
+    else:
+        set_business(shop, plan=plan)
+    booking = add(shop, 71 * HOUR, booked_ago=10 * DAY)
+    shop.reminders.run()
+    shop.reminders.run()
+    assert len(reminded(shop)) == 1
+    assert early(shop, booking) == (True, 1, True, False)
+    assert logged(shop) == [("reminder_early", "customer", "sent")]
+
+
+def test_an_ended_trial_stops_the_earlier_reminder(shop: Shop) -> None:
+    """Once the trial is over, a free business gets no earlier reminder."""
+    set_business(shop, trial_ends_at=datetime.now(UTC) - HOUR)
+    add(shop, 71 * HOUR, booked_ago=10 * DAY)
+    shop.reminders.run()
+    assert reminded(shop) == []
+
+
+@pytest.mark.parametrize(
+    ("hours", "due", "not_due"),
+    [
+        (48, [47, 37], [49, 35]),
+        (72, [71, 49], [73, 47]),
+        (168, [167, 97], [169, 95]),
+    ],
+)
+def test_the_earlier_reminder_is_sent_only_in_its_window(
+    shop: Shop, hours: int, due: list[int], not_due: list[int]
+) -> None:
+    """From the lead time down to halfway to the 24-hour reminder."""
+    set_business(shop, plan="pro", reminder_early_hours=hours)
+    wanted = [add(shop, offset * HOUR, booked_ago=10 * DAY) for offset in due]
+    others = [add(shop, offset * HOUR, booked_ago=10 * DAY) for offset in not_due]
+    shop.reminders.run()
+    assert len(reminded(shop)) == len(wanted)
+    assert all(early(shop, booking)[0] for booking in wanted)
+    assert not any(early(shop, booking)[0] for booking in others)
+
+
+def test_a_booking_made_inside_the_lead_time_gets_no_earlier_reminder(shop: Shop) -> None:
+    """Booked 60 hours ahead: the confirmation has just gone out, so only the 24-hour reminder will follow."""
+    set_business(shop, plan="pro")
+    add(shop, 60 * HOUR, booked_ago=timedelta(minutes=5))
+    shop.reminders.run()
+    assert reminded(shop) == []
+
+
+@pytest.mark.parametrize(("column", "offset"), [("reminder_day_enabled", 23), ("reminder_early_enabled", 71)])
+def test_a_switched_off_reminder_is_not_sent(shop: Shop, column: str, offset: int) -> None:
+    """Each switch stops its own reminder."""
+    set_business(shop, plan="pro", **{column: False})
+    add(shop, offset * HOUR, booked_ago=10 * DAY)
+    shop.reminders.run()
+    assert reminded(shop) == []
+
+
+def test_both_reminders_reach_the_same_booking(shop: Shop) -> None:
+    """After the earlier reminder, the same booking a day away also gets the 24-hour one."""
+    set_business(shop, plan="pro")
+    booking = add(shop, 71 * HOUR, booked_ago=10 * DAY)
+    shop.reminders.run()
+    with shop.database.connection() as connection:
+        connection.execute(
+            "UPDATE bookings SET starts_at = starts_at - interval '48 hours', ends_at = ends_at - interval "
+            "'48 hours', blocked_until = blocked_until - interval '48 hours' WHERE id = %s",
+            (booking,),
+        )
+    shop.reminders.run()
+    assert len(reminded(shop)) == 2
+    assert early(shop, booking)[2:] == (True, True)
+    assert logged(shop) == [("reminder_early", "customer", "sent"), ("reminder", "customer", "sent")]
+
+
+def test_a_failed_earlier_reminder_is_retried_on_its_own(shop: Shop) -> None:
+    """A failure clears only the earlier claim, is not recorded as sent, and a later run sends it."""
+    set_business(shop, plan="pro")
+    booking = add(shop, 71 * HOUR, booked_ago=10 * DAY)
+    shop.mailer.fail = True
+    shop.reminders.run()
+    assert early(shop, booking) == (False, 1, False, False)
+    shop.mailer.fail = False
+    shop.reminders.run()
+    assert early(shop, booking) == (True, 2, True, False)
+
+
+def test_the_note_is_in_the_reminder_as_text(shop: Shop) -> None:
+    """The business's note is included, and markup in it is shown, not run."""
+    set_business(shop, reminder_note="Bring <your> ID")
+    add(shop, 23 * HOUR)
+    shop.reminders.run()
+    message = next(m for m in shop.mailer.sent if m.to in shop.emails)
+    assert "Note from Test & Co" in message.text and "Bring <your> ID" in message.text
+    assert "Bring &lt;your&gt; ID" in message.html
+
+
+def test_a_real_move_resets_the_earlier_reminder_attempts(world: World) -> None:  # noqa: F811
+    """Moving through a manage link lets the earlier reminder be tried afresh for the new time."""
+    reference, token = book(world)
+    with world.database.connection() as connection:
+        connection.execute("UPDATE bookings SET reminder_early_attempts = 3 WHERE reference = %s", (reference,))
+    world.manage.move(world.slug, reference, token, world.day, "12:00")  # type: ignore[arg-type]
+    with world.database.connection() as connection:
+        row = connection.execute(
+            "SELECT reminder_early_attempts FROM bookings WHERE reference = %s", (reference,)
+        ).fetchone()
+    assert row is not None and row[0] == 0
+
+
+def test_owners_change_reminders_within_their_plan(shop: Shop) -> None:
+    """A free owner changes the 24-hour reminder and the note only; a paid owner changes everything."""
+    account = str(uuid.uuid4())
+    with shop.database.connection() as connection:
+        slug = connection.execute("SELECT slug FROM businesses WHERE id = %s", (shop.business_id,)).fetchone()
+        assert slug is not None
+        connection.execute(
+            "INSERT INTO business_members (business_id, user_id, role) VALUES (%s, %s, 'owner')",
+            (shop.business_id, account),
+        )
+    limited = LimitedDatabase(DatabaseSettings.from_env({"DATABASE_URL": os.environ[URL_ENV]}))
+    try:
+        owners = OwnerService(limited)
+        start = owners.reminder_settings(account, slug[0])
+        assert (start.early_allowed, start.day_enabled, start.early_enabled, start.early_hours, start.note) == (
+            False,
+            True,
+            True,
+            72,
+            None,
+        )
+        changed = owners.update_reminder_settings(account, slug[0], ReminderChanges(day_enabled=False, note="Hi"))
+        assert (changed.day_enabled, changed.note) == (False, "Hi")
+        for refused in (ReminderChanges(early_enabled=False), ReminderChanges(early_hours=48, note="No")):
+            with pytest.raises(InvalidChangeError):
+                owners.update_reminder_settings(account, slug[0], refused)
+        assert owners.reminder_settings(account, slug[0]).note == "Hi"
+        set_business(shop, plan="starter")
+        paid = owners.update_reminder_settings(account, slug[0], ReminderChanges(early_hours=168, note=None))
+        assert (paid.early_allowed, paid.early_hours, paid.note) == (True, 168, None)
+        with pytest.raises(NotFoundError):
+            owners.reminder_settings(str(uuid.uuid4()), slug[0])
+        with pytest.raises(NotFoundError):
+            owners.update_reminder_settings(str(uuid.uuid4()), slug[0], ReminderChanges(day_enabled=True))
+    finally:
+        limited.close()
+        with shop.database.connection() as connection:
+            connection.execute("DELETE FROM business_members WHERE business_id = %s", (shop.business_id,))

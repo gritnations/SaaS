@@ -23,6 +23,8 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    ReminderChanges,
+    ReminderSettings,
     SearchResult,
     ServiceChanges,
     Settings,
@@ -71,6 +73,9 @@ SETTINGS = Settings(
     notice_minutes=240,
     window_days=30,
 )
+
+
+REMINDERS = ReminderSettings(early_allowed=True, day_enabled=True, early_enabled=True, early_hours=72, note=None)
 
 
 class FakeVerifier:
@@ -191,6 +196,33 @@ class FakeOwners:
         """
         self._record("search_bookings", account, slug, query)
         return BUSINESS, SearchResult(understood=("Name starts with: Sam",), bookings=(BOOKING,), more=False)
+
+    def reminder_settings(self, account: str, slug: str) -> ReminderSettings:
+        """Return the reminder settings.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+
+        Returns:
+            The settings.
+        """
+        self._record("reminder_settings", account, slug)
+        return REMINDERS
+
+    def update_reminder_settings(self, account: str, slug: str, changes: ReminderChanges) -> ReminderSettings:
+        """Return the reminder settings.
+
+        Args:
+            account: The account.
+            slug: Business slug.
+            changes: The changes.
+
+        Returns:
+            The settings.
+        """
+        self._record("update_reminder_settings", account, slug, changes)
+        return REMINDERS
 
     def services(self, account: str, slug: str) -> list[OwnerServiceRecord]:
         """Return one service.
@@ -389,6 +421,8 @@ ROUTES: list[tuple[str, str, dict[str, Any] | None]] = [
     ("post", "/owner/businesses/example/time-off", {"first_day": "2026-11-16"}),
     ("post", f"/owner/businesses/example/time-off/{ENTRY_ID}/remove", None),
     ("get", "/owner/businesses/example/settings", None),
+    ("get", "/owner/businesses/example/reminders", None),
+    ("patch", "/owner/businesses/example/reminders", {"day_enabled": False}),
     ("patch", "/owner/businesses/example/settings", {"window_days": 14}),
 ]
 
@@ -682,3 +716,59 @@ def test_a_refund_that_failed_leaves_the_booking_alone_and_asks_to_try_again() -
     )
     assert response.status_code == 503
     assert "nothing has changed" in response.json()["detail"]
+
+
+REMINDER_PATH = "/owner/businesses/example/reminders"
+
+
+def test_reminder_settings_are_read() -> None:
+    """The settings come back with whether the plan includes the earlier reminder."""
+    response = signed_in().get(REMINDER_PATH, headers=GOOD)
+    assert response.status_code == 200
+    assert response.json() == {
+        "early_allowed": True,
+        "day_enabled": True,
+        "early_enabled": True,
+        "early_hours": 72,
+        "note": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("body", "sent"),
+    [
+        ({"day_enabled": False}, {"day_enabled": False}),
+        ({"early_enabled": True, "early_hours": 168}, {"early_enabled": True, "early_hours": 168}),
+        ({"note": "  Please arrive 5 minutes early.  "}, {"note": "Please arrive 5 minutes early."}),
+        ({"note": ""}, {"note": None}),
+        ({"note": None}, {"note": None}),
+    ],
+)
+def test_only_the_reminder_fields_sent_are_changed(body: dict[str, Any], sent: dict[str, Any]) -> None:
+    """The service receives exactly what was sent; an empty note clears it."""
+    owners = FakeOwners()
+    assert signed_in(owners).patch(REMINDER_PATH, headers=GOOD, json=body).status_code == 200
+    changes = owners.calls[0][1][2]
+    assert {name: getattr(changes, name) for name in changes.model_fields_set} == sent
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"day_enabled": None},
+        {"early_hours": None},
+        {"early_hours": 24},
+        {"early_hours": "72"},
+        {"day_enabled": "yes"},
+        {"day_enabled": 1},
+        {"note": "x" * 201},
+        {"note": "Book again at https://example.com"},
+        {"note": "line one\nline two"},
+        {"early_allowed": True},
+    ],
+)
+def test_unusable_reminder_changes_are_rejected(body: dict[str, Any]) -> None:
+    """Wrong types, other timings, links and extra fields never reach the service."""
+    owners = FakeOwners()
+    assert signed_in(owners).patch(REMINDER_PATH, headers=GOOD, json=body).status_code == 422
+    assert owners.calls == []

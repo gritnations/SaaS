@@ -13,6 +13,7 @@ Routes:
     * ``GET`` and ``POST /owner/businesses/{business}/services``; ``PATCH .../services/{service}``.
     * ``GET`` and ``PUT /owner/businesses/{business}/hours``.
     * ``GET`` and ``PATCH /owner/businesses/{business}/settings``.
+    * ``GET`` and ``PATCH /owner/businesses/{business}/reminders``: what reminder emails customers get.
     * ``/owner/businesses/{business}/look...``: the booking page look editor (``api.look``).
 
 Responses carry customer details, so the ingress boundary's ``Cache-Control: no-store`` applies.
@@ -44,6 +45,8 @@ from booking.owner import (
     NewBusiness,
     OwnerBooking,
     OwnerServiceRecord,
+    ReminderChanges,
+    ReminderSettings,
     SearchResult,
     ServiceChanges,
     Settings,
@@ -59,9 +62,11 @@ from contracts import (
     OwnerBusinessName,
     OwnerName,
     OwnerServiceName,
+    ReminderEarlyHours,
     clean_email,
     clean_name,
     clean_note,
+    clean_reminder_note,
 )
 from payments.base import ProviderUnavailableError
 from postgres import DatabaseUnavailableError
@@ -130,6 +135,31 @@ class OwnerBackend(Protocol):
 
         Returns:
             The business and what was found.
+        """
+        ...
+
+    def reminder_settings(self, account: str, slug: str) -> ReminderSettings:
+        """See :meth:`booking.owner.OwnerService.reminder_settings`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+
+        Returns:
+            The settings.
+        """
+        ...
+
+    def update_reminder_settings(self, account: str, slug: str, changes: ReminderChanges) -> ReminderSettings:
+        """See :meth:`booking.owner.OwnerService.update_reminder_settings`.
+
+        Args:
+            account: The verified account identifier.
+            slug: Business slug.
+            changes: The changes.
+
+        Returns:
+            The updated settings.
         """
         ...
 
@@ -722,6 +752,84 @@ class SettingsOut(BaseModel):
     public_email: str | None = None
 
 
+class RemindersOut(BaseModel):
+    """A business's reminder settings.
+
+    Attributes:
+        early_allowed: The plan or trial includes the earlier reminder.
+        day_enabled: The 24-hour reminder is on.
+        early_enabled: The earlier reminder is on, while the plan allows it.
+        early_hours: How early the earlier reminder is: 48, 72 or 168 hours.
+        note: The note added to reminders, or ``None``.
+    """
+
+    early_allowed: bool
+    day_enabled: bool
+    early_enabled: bool
+    early_hours: int
+    note: str | None
+
+
+class RemindersBody(BaseModel):
+    """Changes to the reminder settings. Only the fields sent are changed.
+
+    Attributes:
+        day_enabled: Send the 24-hour reminder.
+        early_enabled: Send the earlier reminder. Paid plans and the trial only.
+        early_hours: 48, 72 or 168. Paid plans and the trial only.
+        note: Up to 200 characters, one line, no links. An empty string clears it.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    day_enabled: Annotated[bool, Field(strict=True)] | None = None
+    early_enabled: Annotated[bool, Field(strict=True)] | None = None
+    early_hours: ReminderEarlyHours | None = None
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+    @field_validator("note")
+    @classmethod
+    def check_note(cls, value: str | None) -> str | None:
+        """Accept a note that follows the text rules, or an empty string to clear.
+
+        Args:
+            value: The submitted note.
+
+        Returns:
+            The cleaned note, or an empty string.
+
+        Raises:
+            TextRefusedError: If it has hidden characters or a link.
+        """
+        return clean_reminder_note(value) if value else value
+
+    @model_validator(mode="after")
+    def check_nulls(self) -> "RemindersBody":
+        """Refuse ``null`` for anything but the note.
+
+        Returns:
+            The body.
+
+        Raises:
+            ValueError: If a switch or the timing is ``null``.
+        """
+        for name in sorted(self.model_fields_set - {"note"}):
+            if getattr(self, name) is None:
+                raise ValueError(f"{name} cannot be null")
+        return self
+
+    def changes(self) -> ReminderChanges:
+        """Turn the body into the service's changes.
+
+        Returns:
+            Only the fields sent; an empty or ``null`` note clears it.
+        """
+        sent = {name: getattr(self, name) for name in self.model_fields_set}
+        if "note" in sent:
+            sent["note"] = sent["note"] or None
+        return ReminderChanges(**sent)
+
+
 class SettingsBody(BaseModel):
     """Changes to the booking settings. Only the fields sent are changed.
 
@@ -880,6 +988,24 @@ def _booking_out(business: Business, booking: OwnerBooking) -> OwnerBookingOut:
         customer_note=booking.customer_note,
         created_at=booking.created_at.astimezone(zone).isoformat(),
         payment_status=booking.payment_status,
+    )
+
+
+def _reminders_out(settings: ReminderSettings) -> RemindersOut:
+    """Convert reminder settings for the response.
+
+    Args:
+        settings: The settings.
+
+    Returns:
+        Their public form.
+    """
+    return RemindersOut(
+        early_allowed=settings.early_allowed,
+        day_enabled=settings.day_enabled,
+        early_enabled=settings.early_enabled,
+        early_hours=settings.early_hours,
+        note=settings.note,
     )
 
 
@@ -1399,6 +1525,34 @@ def build_router(
             The entries that remain.
         """
         return TimeOffListOut(entries=_time_off_out(answer(lambda: service().remove_time_off(who, business, entry))))
+
+    @router.get("/businesses/{business}/reminders", response_model=RemindersOut)
+    def get_reminders(who: Account, business: Slug) -> RemindersOut:
+        """Read the reminder settings.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+
+        Returns:
+            The settings.
+        """
+        return _reminders_out(answer(lambda: service().reminder_settings(who, business)))
+
+    @router.patch("/businesses/{business}/reminders", response_model=RemindersOut)
+    def patch_reminders(who: Account, business: Slug, body: RemindersBody) -> RemindersOut:
+        """Change some reminder settings.
+
+        Args:
+            who: The verified account.
+            business: Business slug.
+            body: The changes.
+
+        Returns:
+            The updated settings.
+        """
+        changes = body.changes()
+        return _reminders_out(answer(lambda: service().update_reminder_settings(who, business, changes)))
 
     @router.get("/businesses/{business}/settings", response_model=SettingsOut)
     def get_settings(who: Account, business: Slug) -> SettingsOut:
